@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Git Cheatsheet</title>
+  <style>
+    :root {
+      --bg: #fafaf8; --bg-alt: #f3f3ef; --text: #1c1c1e;
+      --accent: #c0392b; --muted: #6b7280; --border: #e0e0db;
+      --sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      --mono: 'SF Mono', 'Fira Code', Consolas, monospace;
+    }
+    *, *::before, *::after { box-sizing: border-box; }
+    html { font-size: 16px; -webkit-font-smoothing: antialiased; }
+    body { background: var(--bg); color: var(--text); font-family: var(--sans);
+           line-height: 1.6; margin: 0; padding: 2rem 1.25rem; }
+    .page { max-width: 860px; margin: 0 auto; }
+    h1 { font-size: 2rem; font-weight: 700; letter-spacing: -0.02em; margin: 0 0 0.3rem; }
+    .subtitle { color: var(--muted); font-size: 0.9rem; margin: 0 0 2.5rem; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 1.25rem; }
+    .card { background: white; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+    .card-title { font-size: 0.72rem; font-weight: 700; letter-spacing: 0.07em;
+                  text-transform: uppercase; padding: 0.6rem 1rem;
+                  background: var(--bg-alt); border-bottom: 1px solid var(--border);
+                  color: var(--muted); }
+    table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+    td { padding: 0.45rem 1rem; border-bottom: 1px solid var(--border); vertical-align: top; }
+    tr:last-child td { border-bottom: none; }
+    td:first-child { font-family: var(--mono); font-size: 0.78rem; color: var(--accent);
+                     white-space: nowrap; width: 1%; padding-right: 0.5rem; }
+    td:last-child { color: var(--muted); }
+    footer { margin-top: 3rem; font-size: 0.78rem; color: var(--muted);
+             border-top: 1px solid var(--border); padding-top: 1rem; text-align: center; }
+  </style>
+</head>
+<body>
+<div class="page">
+  <h1>Git Cheatsheet</h1>
+  <p class="subtitle">The commands you actually use, day to day.</p>
+  <div class="grid">
+
+    <div class="card">
+      <div class="card-title">Setup</div>
+      <table>
+        <tr><td>git init</td><td>Init a new repo in current dir</td></tr>
+        <tr><td>git clone &lt;url&gt;</td><td>Clone a remote repo</td></tr>
+        <tr><td>git config --global user.name</td><td>Set your name globally</td></tr>
+        <tr><td>git config --global user.email</td><td>Set your email globally</td></tr>
+      </table>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Everyday workflow</div>
+      <table>
+        <tr><td>git status</td><td>Show changed files</td></tr>
+        <tr><td>git add &lt;file&gt;</td><td>Stage a file</td></tr>
+        <tr><td>git add .</td><td>Stage all changes</td></tr>
+        <tr><td>git commit -m "msg"</td><td>Commit staged changes</td></tr>
+        <tr><td>git push</td><td>Push commits to remote</td></tr>
+        <tr><td>git pull</td><td>Fetch + merge from remote</td></tr>
+      </table>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Branches</div>
+      <table>
+        <tr><td>git branch</td><td>List local branches</td></tr>
+        <tr><td>git branch &lt;name&gt;</td><td>Create a branch</td></tr>
+        <tr><td>git switch &lt;name&gt;</td><td>Switch to a branch</td></tr>
+        <tr><td>git switch -c &lt;name&gt;</td><td>Create + switch in one step</td></tr>
+        <tr><td>git merge &lt;branch&gt;</td><td>Merge branch into current</td></tr>
+        <tr><td>git branch -d &lt;name&gt;</td><td>Delete a branch</td></tr>
+      </table>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Inspecting history</div>
+      <table>
+        <tr><td>git log --oneline</td><td>Compact commit history</td></tr>
+        <tr><td>git diff</td><td>Unstaged changes</td></tr>
+        <tr><td>git diff --staged</td><td>Staged changes</td></tr>
+        <tr><td>git show &lt;hash&gt;</td><td>Show a specific commit</td></tr>
+        <tr><td>git blame &lt;file&gt;</td><td>Who changed what line</td></tr>
+      </table>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Undoing things</div>
+      <table>
+        <tr><td>git restore &lt;file&gt;</td><td>Discard unstaged changes</td></tr>
+        <tr><td>git restore --staged &lt;file&gt;</td><td>Unstage a file</td></tr>
+        <tr><td>git revert &lt;hash&gt;</td><td>New commit that undoes one</td></tr>
+        <tr><td>git reset --soft HEAD~1</td><td>Undo last commit, keep changes</td></tr>
+        <tr><td>git stash</td><td>Shelve uncommitted changes</td></tr>
+        <tr><td>git stash pop</td><td>Restore stashed changes</td></tr>
+      </table>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Remote repos</div>
+      <table>
+        <tr><td>git remote -v</td><td>List remotes</td></tr>
+        <tr><td>git remote add origin &lt;url&gt;</td><td>Add a remote</td></tr>
+        <tr><td>git fetch</td><td>Fetch without merging</td></tr>
+        <tr><td>git push -u origin &lt;branch&gt;</td><td>Push + track remote branch</td></tr>
+        <tr><td>git push --force-with-lease</td><td>Safe force push</td></tr>
+      </table>
+    </div>
+
+  </div>
+  <footer>rmtodd · <a href="https://rmtodd.github.io/">← Back to index</a></footer>
+</div>
+</body>
+</html>

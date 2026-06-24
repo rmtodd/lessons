@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lesson 3 — Your First SQL</title>
+  <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div class="page">
+
+  <div class="breadcrumb">
+    <a href="../index.html">PostgreSQL for SaaS</a>
+    <span>Lesson 3</span>
+  </div>
+
+  <header>
+    <div class="lesson-meta">Lesson 3 of 5 &nbsp;·&nbsp; Hands-on</div>
+    <h1>Your First SQL</h1>
+    <p class="subtitle">The four essential statements — and the JOIN that changes everything</p>
+    <div class="lesson-stats">
+      <span>⏱ ~20 minutes</span>
+      <span>📖 Read + quiz</span>
+      <span>🎯 Core language</span>
+    </div>
+  </header>
+
+  <p>SQL is the language you use to talk to PostgreSQL. It has been the standard for relational databases since the 1970s and is understood by every analytics tool, BI platform, and data engineer on earth. Learning it is an investment that doesn't depreciate.</p>
+
+  <p>SQL is <strong>declarative</strong> — you describe what data you want, not how to retrieve it. PostgreSQL figures out the execution plan. This is different from writing a MongoDB aggregation pipeline, where you often specify the steps explicitly.</p>
+
+  <div class="callout">
+    <div class="callout-label">Examples use this SaaS schema</div>
+    <p>All examples assume a simple SaaS schema: <code>users</code>, <code>organizations</code>, <code>org_memberships</code>, and <code>subscriptions</code>. You'll design this schema fully in Lesson 4.</p>
+  </div>
+
+  <!-- ── SELECT ─── -->
+  <h2>SELECT — reading data</h2>
+
+  <p><code>SELECT</code> retrieves rows from a table. The basic form:</p>
+
+  <pre><span class="kw">SELECT</span> * <span class="kw">FROM</span> users;</pre>
+
+  <p><code>*</code> means "all columns." You can name specific columns instead:</p>
+
+  <pre><span class="kw">SELECT</span> id, name, email <span class="kw">FROM</span> users;</pre>
+
+  <h3>Filtering with WHERE</h3>
+  <p><code>WHERE</code> filters which rows are returned:</p>
+
+  <pre><span class="kw">SELECT</span> id, name <span class="kw">FROM</span> users
+<span class="kw">WHERE</span> email = <span class="str">'alice@acme.com'</span>;</pre>
+
+  <pre><span class="kw">SELECT</span> * <span class="kw">FROM</span> subscriptions
+<span class="kw">WHERE</span> status = <span class="str">'active'</span>
+  <span class="kw">AND</span> expires_at > <span class="fn">now</span>();</pre>
+
+  <h3>Ordering and limiting</h3>
+  <pre><span class="kw">SELECT</span> name, created_at <span class="kw">FROM</span> users
+<span class="kw">ORDER BY</span> created_at <span class="kw">DESC</span>
+<span class="kw">LIMIT</span> <span class="num">10</span>;</pre>
+
+  <p>This reads: "Give me the 10 most recently created users, newest first." <code>DESC</code> = descending (newest first); <code>ASC</code> = ascending (oldest first, the default).</p>
+
+  <!-- ── INSERT ─── -->
+  <h2>INSERT — adding data</h2>
+
+  <pre><span class="kw">INSERT INTO</span> users (name, email)
+<span class="kw">VALUES</span> (<span class="str">'Alice'</span>, <span class="str">'alice@acme.com'</span>);</pre>
+
+  <p>You list the columns you're providing; anything with a <code>DEFAULT</code> (like <code>id</code> or <code>created_at</code>) is filled automatically.</p>
+
+  <p>To get the new row back immediately:</p>
+
+  <pre><span class="kw">INSERT INTO</span> users (name, email)
+<span class="kw">VALUES</span> (<span class="str">'Alice'</span>, <span class="str">'alice@acme.com'</span>)
+<span class="kw">RETURNING</span> id, created_at;</pre>
+
+  <p><code>RETURNING</code> is a PostgreSQL extension to the SQL standard — very handy for getting auto-generated IDs back without a second query.</p>
+
+  <!-- ── UPDATE ─── -->
+  <h2>UPDATE — modifying data</h2>
+
+  <pre><span class="kw">UPDATE</span> users
+<span class="kw">SET</span> name = <span class="str">'Alicia'</span>
+<span class="kw">WHERE</span> id = <span class="str">'a1b2c3d4-...'</span>;</pre>
+
+  <div class="callout">
+    <div class="callout-label">Always include WHERE on UPDATE</div>
+    <p><code>UPDATE users SET name = 'Alicia'</code> without a <code>WHERE</code> clause updates <em>every single row</em>. Always double-check your WHERE condition before running an UPDATE in production.</p>
+  </div>
+
+  <!-- ── DELETE ─── -->
+  <h2>DELETE — removing data</h2>
+
+  <pre><span class="kw">DELETE FROM</span> users
+<span class="kw">WHERE</span> id = <span class="str">'a1b2c3d4-...'</span>;</pre>
+
+  <p>Same warning as UPDATE — omitting <code>WHERE</code> deletes all rows. In practice, SaaS apps often use <strong>soft deletes</strong>: add a <code>deleted_at TIMESTAMPTZ</code> column and set it instead of physically removing the row, so you can audit and recover.</p>
+
+  <!-- ── JOIN ─── -->
+  <h2>JOIN — the relational superpower</h2>
+
+  <p>This is the capability that most distinguishes PostgreSQL from MongoDB. A <code>JOIN</code> combines rows from two (or more) tables based on a matching condition — in a single query, in a single round-trip to the database.</p>
+
+  <p><strong>Example:</strong> Find all users who belong to the "Acme" organization, along with their role:</p>
+
+  <pre><span class="kw">SELECT</span>
+  users.name,
+  users.email,
+  org_memberships.role
+<span class="kw">FROM</span> users
+<span class="kw">JOIN</span> org_memberships <span class="kw">ON</span> users.id = org_memberships.user_id
+<span class="kw">JOIN</span> organizations   <span class="kw">ON</span> org_memberships.org_id = organizations.id
+<span class="kw">WHERE</span> organizations.name = <span class="str">'Acme'</span>;</pre>
+
+  <p>This crosses three tables — <code>users</code>, <code>org_memberships</code>, and <code>organizations</code> — and returns exactly the data you need, shaped for display. In MongoDB, this requires multiple queries stitched together in application code.</p>
+
+  <h3>How JOIN works</h3>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>JOIN type</th><th>Returns</th><th>When to use</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><code>JOIN</code> (or <code>INNER JOIN</code>)</td><td>Rows that match in both tables</td><td>Most common — use when both sides must exist</td></tr>
+        <tr><td><code>LEFT JOIN</code></td><td>All rows from the left table, matched or not</td><td>When right side is optional (e.g. users with or without a subscription)</td></tr>
+        <tr><td><code>RIGHT JOIN</code></td><td>All rows from the right table</td><td>Rare — usually rewrite as LEFT JOIN from the other direction</td></tr>
+        <tr><td><code>FULL OUTER JOIN</code></td><td>All rows from both tables</td><td>When you need unmatched rows from both sides</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p><strong>Example:</strong> All users and their subscription status — including users with no subscription yet (<code>LEFT JOIN</code>):</p>
+
+  <pre><span class="kw">SELECT</span>
+  users.name,
+  users.email,
+  subscriptions.status  <span class="cmt">-- NULL if no subscription</span>
+<span class="kw">FROM</span> users
+<span class="kw">LEFT JOIN</span> org_memberships <span class="kw">ON</span> users.id       = org_memberships.user_id
+<span class="kw">LEFT JOIN</span> subscriptions   <span class="kw">ON</span> org_memberships.org_id = subscriptions.org_id;</pre>
+
+  <!-- ── Quick summary ─── -->
+  <h2>The four statements at a glance</h2>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>Statement</th><th>Purpose</th><th>MongoDB equivalent</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><code>SELECT</code></td><td>Read rows</td><td><code>find()</code>, <code>findOne()</code></td></tr>
+        <tr><td><code>INSERT</code></td><td>Add rows</td><td><code>insertOne()</code>, <code>insertMany()</code></td></tr>
+        <tr><td><code>UPDATE</code></td><td>Modify rows</td><td><code>updateOne()</code>, <code>updateMany()</code></td></tr>
+        <tr><td><code>DELETE</code></td><td>Remove rows</td><td><code>deleteOne()</code>, <code>deleteMany()</code></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <hr class="divider">
+
+  <!-- ── Quiz ─── -->
+  <div class="quiz-section">
+    <div class="quiz-header">Retrieval practice — 3 questions</div>
+    <p style="font-family: var(--sans); font-size: 0.85rem; color: var(--muted); margin-bottom: 1.5rem;">Close your eyes for a moment, then answer from memory. The harder it feels, the more it's sticking.</p>
+
+    <div class="quiz-question" data-correct="SELECT">
+      <div class="quiz-q"><span class="q-num">1.</span> Which SQL keyword is used to retrieve data from a table?</div>
+      <div class="quiz-options">
+        <button class="quiz-option" data-value="SELECT">SELECT</button>
+        <button class="quiz-option" data-value="INSERT">INSERT</button>
+        <button class="quiz-option" data-value="UPDATE">UPDATE</button>
+        <button class="quiz-option" data-value="DELETE">DELETE</button>
+      </div>
+      <button class="quiz-check">Check answer</button>
+      <div class="quiz-feedback correct">Correct. SELECT is the read operation — equivalent to MongoDB's find(). The other three (INSERT, UPDATE, DELETE) modify data.</div>
+      <div class="quiz-feedback incorrect">Not quite. SELECT is the read statement in SQL. INSERT adds rows, UPDATE modifies them, DELETE removes them. Think of CRUD: Create → INSERT, Read → SELECT, Update → UPDATE, Delete → DELETE.</div>
+    </div>
+
+    <div class="quiz-question" data-correct="filters">
+      <div class="quiz-q"><span class="q-num">2.</span> What does the WHERE clause do in a SELECT statement?</div>
+      <div class="quiz-options">
+        <button class="quiz-option" data-value="filters">Filters which rows are returned</button>
+        <button class="quiz-option" data-value="defines">Defines which columns to show</button>
+        <button class="quiz-option" data-value="orders">Orders results by a column</button>
+        <button class="quiz-option" data-value="limits">Limits results to one table</button>
+      </div>
+      <button class="quiz-check">Check answer</button>
+      <div class="quiz-feedback correct">Correct. WHERE filters rows — like MongoDB's query selector (the object you pass to find()). Columns are chosen in the SELECT list; ordering uses ORDER BY; limiting uses LIMIT.</div>
+      <div class="quiz-feedback incorrect">Not quite. WHERE filters rows — it's the condition that determines which rows come back. To choose columns, list them after SELECT. To sort, use ORDER BY. To limit row count, use LIMIT.</div>
+    </div>
+
+    <div class="quiz-question" data-correct="combine">
+      <div class="quiz-q"><span class="q-num">3.</span> A JOIN allows you to:</div>
+      <div class="quiz-options">
+        <button class="quiz-option" data-value="combine">Combine rows from multiple tables</button>
+        <button class="quiz-option" data-value="delete">Delete rows across multiple tables</button>
+        <button class="quiz-option" data-value="copy">Copy rows into another table</button>
+        <button class="quiz-option" data-value="sort">Sort rows from multiple columns</button>
+      </div>
+      <button class="quiz-check">Check answer</button>
+      <div class="quiz-feedback correct">Correct. JOIN merges rows from two tables based on a matching condition (like user_id = users.id). This is the key operation that document databases require application code to replicate with multiple queries.</div>
+      <div class="quiz-feedback incorrect">Not quite. JOIN combines rows from multiple tables in a single query. This is the central advantage of relational databases — relationships between entities are queryable directly in SQL, without multiple round trips to the database.</div>
+    </div>
+
+    <div class="quiz-score"></div>
+  </div>
+
+  <hr class="divider">
+
+  <div class="primary-source">
+    <div class="primary-source-label">Recommended primary source</div>
+    <a href="https://www.postgresqltutorial.com/postgresql-tutorial/postgresql-select/" target="_blank" rel="noopener">PostgreSQL Tutorial — SELECT, WHERE, JOIN sections</a>
+    <p>Work through the SELECT, WHERE, and JOIN tutorials on postgresqltutorial.com. Each page has runnable examples and exercises. This is the site to bookmark for hands-on SQL practice — the examples are PostgreSQL-specific and SaaS-relevant.</p>
+  </div>
+
+  <div class="ask-teacher">
+    <strong>Questions? Ask your teacher.</strong>
+    JOINs confuse almost everyone at first. If the <code>ON</code> condition isn't intuitive, or you're unsure when to use LEFT JOIN vs INNER JOIN for your app — bring a concrete example from your product and your teacher can walk through it with you.
+  </div>
+
+  <div class="lesson-nav">
+    <a href="0002-tables-rows-and-keys.html">← Lesson 2: Tables, Rows &amp; Keys</a>
+    <a href="0004-schema-design-for-saas.html">Lesson 4: Schema Design →</a>
+  </div>
+
+  <footer>
+    PostgreSQL for SaaS &nbsp;·&nbsp; Lesson 3 &nbsp;·&nbsp;
+    <a href="../index.html">Course index</a>
+  </footer>
+
+</div>
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

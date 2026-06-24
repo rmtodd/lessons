@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lesson 1 — The Database Landscape</title>
+  <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div class="page">
+
+  <div class="breadcrumb">
+    <span>PostgreSQL for SaaS</span>
+    <span>Lesson 1</span>
+  </div>
+
+  <header>
+    <div class="lesson-meta">Lesson 1 of ∞ &nbsp;·&nbsp; Foundational</div>
+    <h1>The Database Landscape</h1>
+    <p class="subtitle">A map of your options — from what you already know to where PostgreSQL sits</p>
+    <div class="lesson-stats">
+      <span>⏱ ~15 minutes</span>
+      <span>📖 Read + quiz</span>
+      <span>🎯 Orientation</span>
+    </div>
+  </header>
+
+  <!-- ── 1. Starting point ─────────────────── -->
+  <h2>Starting where you are</h2>
+
+  <p>You've used MongoDB or Firebase. You know what it feels like to store a JSON document in a collection and retrieve it by ID. That's a real foundation — not nothing.</p>
+
+  <p>But when you start building a SaaS product — something with user accounts, billing, relationships between entities, audit trails — you'll hear "use PostgreSQL" from a lot of experienced engineers. This lesson explains why, by first mapping the full landscape of database options so you understand the trade-offs rather than just following a recommendation on faith.</p>
+
+  <div class="callout">
+    <div class="callout-label">By the end of this lesson</div>
+    <p>You'll be able to name the five major families of databases, explain what makes each one distinctive, and articulate why SaaS products often end up choosing a relational database like PostgreSQL.</p>
+  </div>
+
+  <!-- ── 2. Two families ───────────────────── -->
+  <h2>The two big families</h2>
+
+  <p>Every database you're likely to encounter belongs to one of two broad families:</p>
+
+  <ul>
+    <li><strong>Relational databases (SQL)</strong> — data is stored in tables with rows and columns. A rigid schema defines the shape of data upfront. Records relate to each other via foreign keys. You query with SQL.</li>
+    <li><strong>Non-relational databases (NoSQL)</strong> — a catch-all for everything else. Data might be stored as documents (JSON-like), key-value pairs, columns, or graphs. Schema is often flexible or nonexistent. Query languages vary.</li>
+  </ul>
+
+  <p>"NoSQL" is an unfortunately vague term — it means "not relational," which doesn't tell you much. Within NoSQL there are at least four distinct sub-families with very different use cases.</p>
+
+  <!-- ── 3. NoSQL map ───────────────────────── -->
+  <h2>Inside NoSQL: four sub-families</h2>
+
+  <p>Since you've already used two of these, we'll use them as anchors.</p>
+
+  <h3>1. Document stores &nbsp;<span class="tag tag-document">You've used these</span></h3>
+  <p>MongoDB, Firebase/Firestore, CouchDB. Data is stored as JSON-like documents grouped into collections. Each document can have a different shape (schema-less). You fetch by ID or by querying fields within documents. <strong>The big trade-off:</strong> flexible and natural for hierarchical data, but querying <em>across</em> documents (especially when data is related) requires more planning, and joins are manual or nonexistent.</p>
+
+  <h3>2. Key-value stores &nbsp;<span class="tag tag-keyvalue">Simplest model</span></h3>
+  <p>Redis, DynamoDB (in simple mode), Memcached. Think of a giant dictionary: you look up a value by a key. No schema, no query language beyond get/set/delete. Blazing fast. Used for caching, sessions, rate limiting, leaderboards. <strong>Not a primary database</strong> for complex application data — you'd lose most of what makes databases useful.</p>
+
+  <h3>3. Wide-column stores &nbsp;<span class="tag tag-column">Scale-first</span></h3>
+  <p>Cassandra, Google Bigtable, HBase. Data is organized by rows, but each row can have a different set of columns. Designed for enormous write throughput at scale (think: millions of writes per second). Complex to model and operate. Almost never the right first choice for a new SaaS product.</p>
+
+  <h3>4. Graph databases &nbsp;<span class="tag tag-graph">Relationship-first</span></h3>
+  <p>Neo4j, Amazon Neptune. Data is modeled as nodes and edges — people, connections between them, and the properties of those connections. Powerful for social graphs, recommendation engines, fraud detection. Niche — most SaaS applications don't need a dedicated graph database, though PostgreSQL can handle many graph-like queries through SQL.</p>
+
+  <!-- ── 4. Relational ──────────────────────── -->
+  <h2>Inside Relational: the main options</h2>
+
+  <p>Now the family you're evaluating:</p>
+
+  <h3>PostgreSQL &nbsp;<span class="tag tag-relational">Our focus</span></h3>
+  <p>Open-source, highly extensible, known for correctness and standards compliance. Supports JSON natively (JSONB), full-text search, geospatial queries, and hundreds of extensions. The de-facto standard for new SaaS products. Runs on every major cloud (AWS RDS, Google Cloud SQL, Supabase, Railway, Neon, etc.).</p>
+
+  <h3>MySQL / MariaDB &nbsp;<span class="tag tag-relational">Relational</span></h3>
+  <p>Older and historically more widely deployed (the M in LAMP stack). Slightly simpler, somewhat less featureful than PostgreSQL. MariaDB is a community fork of MySQL. Most new projects choose PostgreSQL over MySQL; MySQL remains common in legacy systems and WordPress deployments.</p>
+
+  <h3>SQLite &nbsp;<span class="tag tag-relational">Embedded</span></h3>
+  <p>A file-based relational database — the entire database is a single file on disk. No separate server process. Used in mobile apps, desktop apps, embedded systems, and as a local development database. Not designed for concurrent multi-user web applications; not what you'd run in production for a SaaS product.</p>
+
+  <!-- ── 5. Comparison table ───────────────── -->
+  <h2>The landscape at a glance</h2>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Database</th>
+          <th>Family</th>
+          <th>Schema</th>
+          <th>Queries</th>
+          <th>Best for</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr class="highlight-row">
+          <td>PostgreSQL</td>
+          <td><span class="tag tag-relational">Relational</span></td>
+          <td>Enforced (+ JSON)</td>
+          <td>SQL</td>
+          <td>SaaS, complex data, general purpose</td>
+        </tr>
+        <tr>
+          <td>MySQL</td>
+          <td><span class="tag tag-relational">Relational</span></td>
+          <td>Enforced</td>
+          <td>SQL</td>
+          <td>Legacy apps, WordPress, high reads</td>
+        </tr>
+        <tr>
+          <td>SQLite</td>
+          <td><span class="tag tag-relational">Relational</span></td>
+          <td>Enforced</td>
+          <td>SQL</td>
+          <td>Mobile apps, embedded, dev/test</td>
+        </tr>
+        <tr>
+          <td>MongoDB</td>
+          <td><span class="tag tag-document">Document</span></td>
+          <td>Flexible</td>
+          <td>MQL / aggregation</td>
+          <td>Content, catalogs, flexible schemas</td>
+        </tr>
+        <tr>
+          <td>Firebase/Firestore</td>
+          <td><span class="tag tag-document">Document</span></td>
+          <td>Flexible</td>
+          <td>SDK queries</td>
+          <td>Rapid prototyping, mobile, realtime sync</td>
+        </tr>
+        <tr>
+          <td>Redis</td>
+          <td><span class="tag tag-keyvalue">Key-Value</span></td>
+          <td>None</td>
+          <td>Commands</td>
+          <td>Caching, sessions, queues</td>
+        </tr>
+        <tr>
+          <td>Cassandra</td>
+          <td><span class="tag tag-column">Wide-Column</span></td>
+          <td>Per-row flexible</td>
+          <td>CQL</td>
+          <td>IoT, time-series, massive write scale</td>
+        </tr>
+        <tr>
+          <td>Neo4j</td>
+          <td><span class="tag tag-graph">Graph</span></td>
+          <td>Node + edge props</td>
+          <td>Cypher</td>
+          <td>Social graphs, fraud, recommendations</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- ── 6. Why PostgreSQL for SaaS ────────── -->
+  <h2>Why PostgreSQL keeps showing up in SaaS</h2>
+
+  <p>Think about what a typical SaaS application needs to manage:</p>
+
+  <ul>
+    <li><strong>Users</strong> — each with an account, profile, and settings</li>
+    <li><strong>Organizations</strong> — users belong to orgs; orgs have billing plans</li>
+    <li><strong>Subscriptions &amp; invoices</strong> — financial data that must never be wrong or inconsistent</li>
+    <li><strong>Feature usage &amp; audit logs</strong> — who did what, when</li>
+    <li><strong>The core domain</strong> — projects, documents, tasks, messages — whatever your app does</li>
+  </ul>
+
+  <p>This data is deeply <em>relational</em>. A user belongs to an org, which has a subscription, which covers a set of features. If you store this in a document database, you're constantly working around the lack of joins — either embedding data everywhere (then keeping copies in sync) or writing complex application-level queries to stitch things together.</p>
+
+  <p>PostgreSQL gives you:</p>
+
+  <ul>
+    <li><strong>Structure you can trust.</strong> A schema means your database enforces that every row has the data your application expects — no surprises at runtime.</li>
+    <li><strong>Joins.</strong> You can query across related tables in a single statement rather than making multiple round trips from application code.</li>
+    <li><strong>ACID transactions.</strong> When you charge a card and update a subscription, either both happen or neither does. No half-complete states.</li>
+    <li><strong>SQL.</strong> A 50-year-old standard understood by every BI tool, analytics platform, and data engineer on earth. Your data is not locked into a proprietary query language.</li>
+    <li><strong>Flexibility where you need it.</strong> PostgreSQL's <code>JSONB</code> column type lets you store flexible, schema-less data inside a relational table. You get the benefits of both models.</li>
+  </ul>
+
+  <div class="callout">
+    <div class="callout-label">The JSONB shortcut</div>
+    <p>One common misconception: "I need MongoDB because my data has varying shapes." PostgreSQL's <code>JSONB</code> type lets you store arbitrary JSON inside a column, and you can even index into it. You can have a <code>users</code> table with a structured <code>email</code> and <code>created_at</code>, and an unstructured <code>metadata JSONB</code> column for anything else. You often don't have to choose.</p>
+  </div>
+
+  <!-- ── 7. When NOT PostgreSQL ─────────────── -->
+  <h2>When PostgreSQL is not the right choice</h2>
+
+  <p>It's worth being honest about the cases where another database makes more sense:</p>
+
+  <ul>
+    <li><strong>You need real-time sync to clients.</strong> Firebase/Firestore has built-in real-time subscriptions. PostgreSQL requires extra infrastructure (like Supabase Realtime or polling) to achieve this.</li>
+    <li><strong>You're building a rapid prototype with highly uncertain schema.</strong> A document database lets you change your data shape freely without migrations. This advantage shrinks as the product matures.</li>
+    <li><strong>You need to cache at extreme speed.</strong> Redis alongside PostgreSQL, not instead of it.</li>
+    <li><strong>You're handling truly massive write throughput at IoT scale</strong> (millions of events/sec). Cassandra was built for this.</li>
+  </ul>
+
+  <p>For most SaaS products, especially in their first several years, PostgreSQL is the default that you rarely regret. The ecosystem, tooling, and community are exceptional.</p>
+
+  <hr class="divider">
+
+  <!-- ── Quiz ──────────────────────────────── -->
+  <div class="quiz-section">
+    <div class="quiz-header">Retrieval practice — 3 questions</div>
+    <p style="font-family: var(--sans); font-size: 0.85rem; color: var(--muted); margin-bottom: 1.5rem;">
+      Answer from memory without scrolling up. Effort here builds long-term retention.
+    </p>
+
+    <!-- Q1 -->
+    <div class="quiz-question" data-correct="relational">
+      <div class="quiz-q"><span class="q-num">1.</span> PostgreSQL belongs to which database family?</div>
+      <div class="quiz-options">
+        <button class="quiz-option" data-value="relational">A relational database</button>
+        <button class="quiz-option" data-value="document">A document database</button>
+        <button class="quiz-option" data-value="keyvalue">A key-value database</button>
+        <button class="quiz-option" data-value="column">A wide-column database</button>
+      </div>
+      <button class="quiz-check">Check answer</button>
+      <div class="quiz-feedback correct">Correct. PostgreSQL is a relational database — data lives in tables with rows and columns, tied together with foreign keys. MongoDB and Firebase, which you've used, are document databases.</div>
+      <div class="quiz-feedback incorrect">Not quite. PostgreSQL is a relational database — data lives in structured tables with enforced schemas. MongoDB and Firebase (which you've used) are the document databases.</div>
+    </div>
+
+    <!-- Q2 -->
+    <div class="quiz-question" data-correct="document">
+      <div class="quiz-q"><span class="q-num">2.</span> MongoDB and Firebase/Firestore are examples of which NoSQL sub-family?</div>
+      <div class="quiz-options">
+        <button class="quiz-option" data-value="document">Document store databases</button>
+        <button class="quiz-option" data-value="keyvalue">Key-value store databases</button>
+        <button class="quiz-option" data-value="column">Wide-column store databases</button>
+        <button class="quiz-option" data-value="graph">Graph-based store databases</button>
+      </div>
+      <button class="quiz-check">Check answer</button>
+      <div class="quiz-feedback correct">Correct. Both MongoDB and Firebase store data as JSON-like documents inside collections. That's the defining characteristic of document stores.</div>
+      <div class="quiz-feedback incorrect">Not quite. MongoDB and Firebase are document stores — they store JSON-like documents in collections. Key-value stores (like Redis) are simpler: just a key that maps to a value, no document structure.</div>
+    </div>
+
+    <!-- Q3 -->
+    <div class="quiz-question" data-correct="relational">
+      <div class="quiz-q"><span class="q-num">3.</span> A SaaS app has users, billing plans, and invoices with complex relationships. Which database type is the strongest default?</div>
+      <div class="quiz-options">
+        <button class="quiz-option" data-value="relational">A relational database</button>
+        <button class="quiz-option" data-value="document">A document database</button>
+        <button class="quiz-option" data-value="keyvalue">A key-value database</button>
+        <button class="quiz-option" data-value="graph">A graph-only database</button>
+      </div>
+      <button class="quiz-check">Check answer</button>
+      <div class="quiz-feedback correct">Correct. Complex relationships (users → orgs → billing → invoices) are exactly what relational databases are designed for. SQL joins, ACID transactions, and enforced schemas make this kind of data reliable and queryable.</div>
+      <div class="quiz-feedback incorrect">Think about the data: users belong to orgs, orgs have billing plans, billing plans have invoices. That web of relationships is the natural home of a relational database. Document databases make you handle joins in application code — workable, but increasingly painful as the data model grows.</div>
+    </div>
+
+    <div class="quiz-score"></div>
+  </div>
+
+  <hr class="divider">
+
+  <!-- ── Primary source ────────────────────── -->
+  <div class="primary-source">
+    <div class="primary-source-label">Recommended primary source</div>
+    <a href="https://dataintensive.net/" target="_blank" rel="noopener">Designing Data-Intensive Applications — Chapter 1: Reliable, Scalable, and Maintainable Applications</a>
+    <p>Martin Kleppmann's book is the most thorough and readable treatment of why different databases make different trade-offs. Chapter 1 sets up the mental model that everything else builds on. The full book is worth owning; chapter 1 is freely previewable. This is the resource that will give you the most lasting understanding of the landscape you just mapped.</p>
+  </div>
+
+  <!-- ── Ask your teacher ───────────────────── -->
+  <div class="ask-teacher">
+    <strong>Questions? Ask your teacher.</strong>
+    Anything unclear here — a term that didn't land, a concept that needs more grounding, or a question specific to your SaaS project — bring it to the next session. Your teacher can explain it in the context of what you're building.
+  </div>
+
+  <!-- ── Next lesson nav ───────────────────── -->
+  <div class="lesson-nav">
+    <span style="color: var(--muted); font-size: 0.85rem;">Next: How relational databases work →</span>
+  </div>
+
+  <footer>
+    PostgreSQL for SaaS &nbsp;·&nbsp; Lesson 1 of ∞ &nbsp;·&nbsp;
+    <a href="../RESOURCES.md">Resources</a>
+  </footer>
+
+</div>
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lesson 4 — Schema Design for SaaS</title>
+  <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div class="page">
+
+  <div class="breadcrumb">
+    <a href="../index.html">PostgreSQL for SaaS</a>
+    <span>Lesson 4</span>
+  </div>
+
+  <header>
+    <div class="lesson-meta">Lesson 4 of 5 &nbsp;·&nbsp; Applied</div>
+    <h1>Schema Design for SaaS</h1>
+    <p class="subtitle">Modeling users, organizations, memberships, and subscriptions — a complete worked example</p>
+    <div class="lesson-stats">
+      <span>⏱ ~20 minutes</span>
+      <span>📖 Read + quiz</span>
+      <span>🎯 Practical design</span>
+    </div>
+  </header>
+
+  <p>This lesson builds the schema you'd actually ship for a multi-tenant SaaS product. We'll go from "what entities exist?" to a complete, production-ready <code>CREATE TABLE</code> set — step by step.</p>
+
+  <!-- ── Start with entities ─── -->
+  <h2>Step 1: Identify your entities</h2>
+
+  <p>Every SaaS product manages roughly the same core concepts:</p>
+
+  <ul>
+    <li><strong>Users</strong> — people with accounts</li>
+    <li><strong>Organizations</strong> — teams or companies (the billing unit)</li>
+    <li><strong>Memberships</strong> — which users belong to which orgs, and in what role</li>
+    <li><strong>Plans</strong> — the tiers you offer (free, pro, enterprise)</li>
+    <li><strong>Subscriptions</strong> — which org is on which plan, and since when</li>
+  </ul>
+
+  <p>Each entity becomes a table. The relationships between them become foreign keys and junction tables.</p>
+
+  <!-- ── Map the relationships ─── -->
+  <h2>Step 2: Map the relationships</h2>
+
+  <div class="rel-diagram">
+    <div class="rel-row">
+      <span class="rel-entity">users</span>
+      <span class="rel-arrow">↔</span>
+      <span class="rel-entity">organizations</span>
+      <span class="rel-label">many-to-many (via org_memberships)</span>
+    </div>
+    <div class="rel-row">
+      <span class="rel-entity">organizations</span>
+      <span class="rel-arrow">→</span>
+      <span class="rel-entity">subscriptions</span>
+      <span class="rel-label">one-to-many (an org has one active subscription at a time)</span>
+    </div>
+    <div class="rel-row">
+      <span class="rel-entity">subscriptions</span>
+      <span class="rel-arrow">→</span>
+      <span class="rel-entity">plans</span>
+      <span class="rel-label">many-to-one (many subscriptions share a plan)</span>
+    </div>
+  </div>
+
+  <p>The trickiest relationship is <strong>users ↔ organizations</strong>. A user can belong to multiple orgs (invited to a work org and a personal one). An org can have many users. This is a <strong>many-to-many</strong> relationship, and it requires a <em>junction table</em> to model correctly.</p>
+
+  <div class="callout">
+    <div class="callout-label">Why a junction table?</div>
+    <p>You can't store "Alice belongs to Acme and Globex" in the <code>users</code> table without repeating data. You can't store "Acme has Alice and Bob" in the <code>organizations</code> table cleanly either. A separate <code>org_memberships</code> table with <code>(user_id, org_id, role)</code> rows is the standard solution — one row per relationship, no repetition.</p>
+  </div>
+
+  <!-- ── Build it ─── -->
+  <h2>Step 3: Write the schema</h2>
+
+  <h3>Users</h3>
+  <pre><span class="kw">CREATE TABLE</span> users (
+  id         <span class="typ">UUID</span>        <span class="kw">PRIMARY KEY DEFAULT</span> <span class="fn">gen_random_uuid</span>(),
+  email      <span class="typ">TEXT</span>        <span class="kw">NOT NULL UNIQUE</span>,
+  name       <span class="typ">TEXT</span>        <span class="kw">NOT NULL</span>,
+  created_at <span class="typ">TIMESTAMPTZ</span> <span class="kw">NOT NULL DEFAULT</span> <span class="fn">now</span>()
+);</pre>
+
+  <p>Note the choices: <code>UUID</code> primary key (globally unique, safe to expose in URLs), <code>TIMESTAMPTZ</code> (stores timezone info — always use this over plain <code>TIMESTAMP</code>), and <code>UNIQUE</code> on email (enforced at the database layer).</p>
+
+  <h3>Organizations</h3>
+  <pre><span class="kw">CREATE TABLE</span> organizations (
+  id         <span class="typ">UUID</span>        <span class="kw">PRIMARY KEY DEFAULT</span> <span class="fn">gen_random_uuid</span>(),
+  name       <span class="typ">TEXT</span>        <span class="kw">NOT NULL</span>,
+  slug       <span class="typ">TEXT</span>        <span class="kw">NOT NULL UNIQUE</span>, <span class="cmt">-- for URLs: acme.yourapp.com</span>
+  created_at <span class="typ">TIMESTAMPTZ</span> <span class="kw">NOT NULL DEFAULT</span> <span class="fn">now</span>()
+);</pre>
+
+  <h3>Org memberships (the junction table)</h3>
+  <pre><span class="kw">CREATE TABLE</span> org_memberships (
+  user_id    <span class="typ">UUID</span>        <span class="kw">NOT NULL REFERENCES</span> users(id) <span class="kw">ON DELETE CASCADE</span>,
+  org_id     <span class="typ">UUID</span>        <span class="kw">NOT NULL REFERENCES</span> organizations(id) <span class="kw">ON DELETE CASCADE</span>,
+  role       <span class="typ">TEXT</span>        <span class="kw">NOT NULL DEFAULT</span> <span class="str">'member'</span>
+                          <span class="kw">CHECK</span> (role <span class="kw">IN</span> (<span class="str">'owner'</span>, <span class="str">'admin'</span>, <span class="str">'member'</span>)),
+  created_at <span class="typ">TIMESTAMPTZ</span> <span class="kw">NOT NULL DEFAULT</span> <span class="fn">now</span>(),
+  <span class="kw">PRIMARY KEY</span> (user_id, org_id)
+);</pre>
+
+  <p>Key details here:</p>
+  <ul>
+    <li><code>ON DELETE CASCADE</code> — if a user is deleted, their memberships are automatically deleted too. No orphaned rows.</li>
+    <li><code>CHECK (role IN (...))</code> — the database rejects any role value not in this list. No "superadmin" typos slipping through.</li>
+    <li><code>PRIMARY KEY (user_id, org_id)</code> — a composite primary key that prevents duplicate memberships (a user can only be in an org once).</li>
+  </ul>
+
+  <h3>Plans</h3>
+  <pre><span class="kw">CREATE TABLE</span> plans (
+  id                 <span class="typ">UUID</span>    <span class="kw">PRIMARY KEY DEFAULT</span> <span class="fn">gen_random_uuid</span>(),
+  name               <span class="typ">TEXT</span>    <span class="kw">NOT NULL UNIQUE</span>, <span class="cmt">-- 'free', 'pro', 'enterprise'</span>
+  monthly_price_cents <span class="typ">INTEGER</span> <span class="kw">NOT NULL CHECK</span> (monthly_price_cents >= <span class="num">0</span>)
+);</pre>
+
+  <p>Currency is stored as <strong>cents</strong> (an integer), not dollars (a float). Floating-point arithmetic is not safe for money — <code>0.1 + 0.2</code> is not exactly <code>0.3</code> in IEEE 754. Integers are exact. Divide by 100 at display time.</p>
+
+  <h3>Subscriptions</h3>
+  <pre><span class="kw">CREATE TABLE</span> subscriptions (
+  id         <span class="typ">UUID</span>        <span class="kw">PRIMARY KEY DEFAULT</span> <span class="fn">gen_random_uuid</span>(),
+  org_id     <span class="typ">UUID</span>        <span class="kw">NOT NULL REFERENCES</span> organizations(id),
+  plan_id    <span class="typ">UUID</span>        <span class="kw">NOT NULL REFERENCES</span> plans(id),
+  status     <span class="typ">TEXT</span>        <span class="kw">NOT NULL DEFAULT</span> <span class="str">'active'</span>
+                          <span class="kw">CHECK</span> (status <span class="kw">IN</span> (<span class="str">'active'</span>, <span class="str">'past_due'</span>, <span class="str">'canceled'</span>)),
+  started_at <span class="typ">TIMESTAMPTZ</span> <span class="kw">NOT NULL DEFAULT</span> <span class="fn">now</span>(),
+  expires_at <span class="typ">TIMESTAMPTZ</span>  <span class="cmt">-- NULL means open-ended</span>
+);</pre>
+
+  <!-- ── Normalization ─── -->
+  <h2>Step 4: Understand what normalization gave you</h2>
+
+  <p>Notice what's <em>not</em> in the schema: the plan name and price don't appear in <code>subscriptions</code>. You might be tempted to copy <code>plan_name</code> into every subscription row so you don't need a JOIN to look it up. This is called <strong>denormalization</strong>, and it creates a problem: when you rename "Pro" to "Pro Plus", you'd have to update thousands of subscription rows.</p>
+
+  <p><strong>Normalization</strong> means each fact exists in exactly one place. The plan name lives in <code>plans</code>. Subscriptions reference it. You JOIN when you need it. One source of truth, one place to update.</p>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th></th><th>Normalized (what we built)</th><th>Denormalized (what to avoid)</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Plan name stored in</td><td><code>plans.name</code> — once</td><td><code>subscriptions.plan_name</code> — every row</td></tr>
+        <tr><td>Update plan name</td><td>One UPDATE to <code>plans</code></td><td>UPDATE thousands of subscription rows</td></tr>
+        <tr><td>Data consistency</td><td>Guaranteed by FK</td><td>Application must keep in sync</td></tr>
+        <tr><td>Query complexity</td><td>Need a JOIN</td><td>No JOIN needed</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- ── A real query ─── -->
+  <h2>Step 5: A real query against your schema</h2>
+
+  <p>"Show me all active subscribers and what plan they're on:"</p>
+
+  <pre><span class="kw">SELECT</span>
+  organizations.name  <span class="kw">AS</span> org_name,
+  plans.name          <span class="kw">AS</span> plan_name,
+  subscriptions.started_at
+<span class="kw">FROM</span> subscriptions
+<span class="kw">JOIN</span> organizations <span class="kw">ON</span> subscriptions.org_id  = organizations.id
+<span class="kw">JOIN</span> plans         <span class="kw">ON</span> subscriptions.plan_id = plans.id
+<span class="kw">WHERE</span> subscriptions.status = <span class="str">'active'</span>
+<span class="kw">ORDER BY</span> subscriptions.started_at <span class="kw">DESC</span>;</pre>
+
+  <p>This returns a clean table of org names, plan names, and start dates — all in one query, because the relationships are modeled explicitly in the schema.</p>
+
+  <hr class="divider">
+
+  <!-- ── Quiz ─── -->
+  <div class="quiz-section">
+    <div class="quiz-header">Retrieval practice — 3 questions</div>
+    <p style="font-family: var(--sans); font-size: 0.85rem; color: var(--muted); margin-bottom: 1.5rem;">Resist the urge to scroll. The recall effort builds the memory.</p>
+
+    <div class="quiz-question" data-correct="junction">
+      <div class="quiz-q"><span class="q-num">1.</span> The <code>org_memberships</code> table exists to model what kind of relationship?</div>
+      <div class="quiz-options">
+        <button class="quiz-option" data-value="junction">A many-to-many relationship</button>
+        <button class="quiz-option" data-value="onetomany">A one-to-many relationship</button>
+        <button class="quiz-option" data-value="onetoone">A one-to-one constraint</button>
+        <button class="quiz-option" data-value="migration">A schema migration step</button>
+      </div>
+      <button class="quiz-check">Check answer</button>
+      <div class="quiz-feedback correct">Correct. Users can belong to many orgs, and orgs can have many users — that's many-to-many. A junction table (also called a join table or bridge table) with (user_id, org_id) rows is the standard pattern for modeling it.</div>
+      <div class="quiz-feedback incorrect">Not quite. The user ↔ organization relationship is many-to-many — a user can be in many orgs, and an org can have many users. A junction table like org_memberships holds one row per (user, org) pair to represent this.</div>
+    </div>
+
+    <div class="quiz-question" data-correct="once">
+      <div class="quiz-q"><span class="q-num">2.</span> Normalization means each piece of data is:</div>
+      <div class="quiz-options">
+        <button class="quiz-option" data-value="once">Stored in exactly one place</button>
+        <button class="quiz-option" data-value="tables">Stored in every related table</button>
+        <button class="quiz-option" data-value="joins">Stored to avoid using joins</button>
+        <button class="quiz-option" data-value="index">Stored with a lookup index</button>
+      </div>
+      <button class="quiz-check">Check answer</button>
+      <div class="quiz-feedback correct">Correct. Normalization means one fact, one place. The plan name lives in plans — not repeated in every subscription row. When it changes, you update one row, not thousands.</div>
+      <div class="quiz-feedback incorrect">Not quite. Normalization is the opposite: each fact is stored in exactly one place. Copying data into multiple tables is called denormalization — it can improve query speed but creates consistency problems when that data changes.</div>
+    </div>
+
+    <div class="quiz-question" data-correct="cents">
+      <div class="quiz-q"><span class="q-num">3.</span> Why is <code>monthly_price_cents INTEGER</code> preferred over <code>monthly_price FLOAT</code> for money?</div>
+      <div class="quiz-options">
+        <button class="quiz-option" data-value="cents">Integers avoid floating-point rounding errors</button>
+        <button class="quiz-option" data-value="speed">Integers run faster than float columns</button>
+        <button class="quiz-option" data-value="size">Integers use less disk space always</button>
+        <button class="quiz-option" data-value="sort">Integers sort more reliably than floats</button>
+      </div>
+      <button class="quiz-check">Check answer</button>
+      <div class="quiz-feedback correct">Correct. Floating-point numbers (FLOAT, DOUBLE) cannot represent all decimal values exactly — 0.1 + 0.2 ≠ 0.3 in IEEE 754 arithmetic. For currency, you need exact arithmetic. Store as integer cents, divide by 100 at display time.</div>
+      <div class="quiz-feedback incorrect">The key reason is correctness, not performance. Floating-point arithmetic has rounding errors — 0.1 + 0.2 in a float is not exactly 0.3. For money, that's dangerous. Storing cents as an integer gives you exact arithmetic: 10 cents + 20 cents = 30 cents, always.</div>
+    </div>
+
+    <div class="quiz-score"></div>
+  </div>
+
+  <hr class="divider">
+
+  <div class="primary-source">
+    <div class="primary-source-label">Recommended primary source</div>
+    <a href="https://dataintensive.net/" target="_blank" rel="noopener">Designing Data-Intensive Applications — Chapter 2: Data Models and Query Languages</a>
+    <p>Chapter 2 of Kleppmann's book is the deepest, most balanced treatment of relational vs document models you'll find — it goes well beyond surface comparisons to explain <em>why</em> each model makes its trade-offs. The section on normalization (pp. 33–38 in the first edition) directly extends this lesson. Worth reading after you've absorbed the schema example above.</p>
+  </div>
+
+  <div class="ask-teacher">
+    <strong>Questions? Ask your teacher.</strong>
+    Schema design gets more nuanced as the product grows — when to denormalize for performance, how to handle soft deletes, how to model permissions. If you have a specific feature in your SaaS in mind ("how would I model API keys?" or "how do I track plan upgrades over time?"), bring it to the next session and your teacher can work through it with you.
+  </div>
+
+  <div class="lesson-nav">
+    <a href="0003-your-first-sql.html">← Lesson 3: Your First SQL</a>
+    <a href="0005-postgresql-superpowers.html">Lesson 5: PostgreSQL's Superpowers →</a>
+  </div>
+
+  <footer>
+    PostgreSQL for SaaS &nbsp;·&nbsp; Lesson 4 &nbsp;·&nbsp;
+    <a href="../index.html">Course index</a>
+  </footer>
+
+</div>
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

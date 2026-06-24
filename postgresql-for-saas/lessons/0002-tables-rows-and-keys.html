@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lesson 2 — Tables, Rows &amp; Keys</title>
+  <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div class="page">
+
+  <div class="breadcrumb">
+    <a href="../index.html">PostgreSQL for SaaS</a>
+    <span>Lesson 2</span>
+  </div>
+
+  <header>
+    <div class="lesson-meta">Lesson 2 of 5 &nbsp;·&nbsp; Foundational</div>
+    <h1>Tables, Rows &amp; Keys</h1>
+    <p class="subtitle">How PostgreSQL organizes data — and why it's fundamentally different from MongoDB</p>
+    <div class="lesson-stats">
+      <span>⏱ ~15 minutes</span>
+      <span>📖 Read + quiz</span>
+      <span>🎯 Core concepts</span>
+    </div>
+  </header>
+
+  <h2>From documents to tables</h2>
+
+  <p>In MongoDB, a user lives in a collection as a JSON document. In PostgreSQL, that same user lives in a <strong>table</strong> as a <strong>row</strong>. The concepts map closely — but the implications are very different.</p>
+
+  <div class="compare">
+    <div class="compare-panel">
+      <div class="compare-label mongo">MongoDB — a user document</div>
+      <pre>{
+  "_id": "a1b2c3",
+  "name": "Alice",
+  "email": "alice@acme.com",
+  "role": "admin"
+}</pre>
+    </div>
+    <div class="compare-panel">
+      <div class="compare-label sql">PostgreSQL — a users table</div>
+      <pre><span class="kw">SELECT</span> * <span class="kw">FROM</span> users;
+
+ id  │ name  │ email           │ role
+─────┼───────┼─────────────────┼───────
+ 1   │ Alice │ alice@acme.com  │ admin
+ 2   │ Bob   │ bob@acme.com    │ member</pre>
+    </div>
+  </div>
+
+  <p>The document and the row contain the same data. What changes is the <em>structure</em> enforcing that data.</p>
+
+  <!-- ── Anatomy of a table ─── -->
+  <h2>Anatomy of a table</h2>
+
+  <p>A PostgreSQL table is a grid:</p>
+
+  <ul>
+    <li><strong>Columns</strong> define the shape — each column has a name and a data type (<code>TEXT</code>, <code>INTEGER</code>, <code>TIMESTAMPTZ</code>, etc.). Every row in the table must conform to this shape.</li>
+    <li><strong>Rows</strong> are the individual records — one row per user, one row per invoice, one row per event.</li>
+    <li><strong>Schema</strong> is the full definition of what columns exist, what types they are, and what constraints they enforce (like "email must be unique" or "name cannot be null").</li>
+  </ul>
+
+  <p>This is the core difference from MongoDB: you declare the shape of your data <em>upfront</em>, and the database enforces it on every insert and update. You can't accidentally store a user without an email if you've defined <code>email TEXT NOT NULL</code>.</p>
+
+  <div class="callout">
+    <div class="callout-label">Why this matters for SaaS</div>
+    <p>SaaS data tends to be business-critical — user accounts, billing records, access permissions. A document database lets you store a subscription record missing its <code>plan_id</code>. PostgreSQL rejects it at the database layer, not the application layer. Fewer bugs reach production.</p>
+  </div>
+
+  <!-- ── Primary keys ─── -->
+  <h2>Primary keys: the unique identifier</h2>
+
+  <p>Every row needs a unique identifier so you can refer to it precisely. In MongoDB, that's <code>_id</code> — auto-generated and always present. In PostgreSQL, you declare a <strong>primary key</strong> column yourself.</p>
+
+  <pre><span class="kw">CREATE TABLE</span> users (
+  id         <span class="typ">UUID</span>        <span class="kw">PRIMARY KEY DEFAULT</span> <span class="fn">gen_random_uuid</span>(),
+  email      <span class="typ">TEXT</span>        <span class="kw">NOT NULL UNIQUE</span>,
+  name       <span class="typ">TEXT</span>        <span class="kw">NOT NULL</span>,
+  created_at <span class="typ">TIMESTAMPTZ</span> <span class="kw">NOT NULL DEFAULT</span> <span class="fn">now</span>()
+);</pre>
+
+  <p>Breaking that down:</p>
+  <ul>
+    <li><code>id UUID PRIMARY KEY DEFAULT gen_random_uuid()</code> — a UUID column that PostgreSQL fills automatically, just like MongoDB's <code>_id</code>.</li>
+    <li><code>NOT NULL</code> — this column can never be empty.</li>
+    <li><code>UNIQUE</code> — no two rows can have the same email.</li>
+    <li><code>DEFAULT now()</code> — automatically set to the current timestamp when a row is inserted.</li>
+  </ul>
+
+  <!-- ── Foreign keys ─── -->
+  <h2>Foreign keys: the link between tables</h2>
+
+  <p>This is where relational databases earn their name — and where they diverge most from MongoDB.</p>
+
+  <p>Imagine you have an <code>organizations</code> table and want to track which org each user belongs to. In MongoDB, you might embed the org name inside the user document, or store an <code>org_id</code> field and manually ensure it matches a real org. PostgreSQL formalizes this with a <strong>foreign key</strong>:</p>
+
+  <pre><span class="kw">CREATE TABLE</span> org_memberships (
+  user_id    <span class="typ">UUID</span>  <span class="kw">NOT NULL REFERENCES</span> users(id),
+  org_id     <span class="typ">UUID</span>  <span class="kw">NOT NULL REFERENCES</span> organizations(id),
+  role       <span class="typ">TEXT</span>  <span class="kw">NOT NULL DEFAULT</span> <span class="str">'member'</span>,
+  <span class="kw">PRIMARY KEY</span> (user_id, org_id)
+);</pre>
+
+  <p><code>REFERENCES users(id)</code> tells PostgreSQL: <em>every value in <code>user_id</code> must correspond to an existing row in <code>users.id</code></em>. If you try to insert a membership for a user that doesn't exist, the database rejects it. If you try to delete a user who has memberships, the database protects the relationship.</p>
+
+  <p>This is called <strong>referential integrity</strong> — the database guarantees your relationships are never broken, even under concurrent writes.</p>
+
+  <div class="callout">
+    <div class="callout-label">The MongoDB comparison</div>
+    <p>In MongoDB, if you store <code>{ user_id: "abc123", org_id: "xyz789" }</code> in a memberships collection, nothing stops <code>"abc123"</code> from being a user that was deleted yesterday. You have to enforce this in application code. PostgreSQL does it at the database layer — always, for every write, from every connection.</p>
+  </div>
+
+  <!-- ── Schema enforcement ─── -->
+  <h2>Schema enforcement: the contract</h2>
+
+  <p>The schema is a contract between your application and your database. PostgreSQL will hold you to it:</p>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>Constraint</th><th>What it enforces</th><th>Example</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><code>NOT NULL</code></td><td>Column cannot be empty</td><td><code>email TEXT NOT NULL</code></td></tr>
+        <tr><td><code>UNIQUE</code></td><td>No two rows can share a value</td><td><code>email TEXT UNIQUE</code></td></tr>
+        <tr><td><code>PRIMARY KEY</code></td><td>Unique + not null — identifies the row</td><td><code>id UUID PRIMARY KEY</code></td></tr>
+        <tr><td><code>REFERENCES</code></td><td>Value must exist in another table</td><td><code>org_id UUID REFERENCES orgs(id)</code></td></tr>
+        <tr><td><code>CHECK</code></td><td>Custom rule must be true</td><td><code>CHECK (price_cents >= 0)</code></td></tr>
+        <tr><td><code>DEFAULT</code></td><td>Value filled automatically</td><td><code>created_at DEFAULT now()</code></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>Every single write — from your API, your background jobs, your admin scripts, any database connection — is checked against all these constraints. There is no way to bypass them except by explicitly dropping them (which you would never do in production).</p>
+
+  <hr class="divider">
+
+  <!-- ── Quiz ─── -->
+  <div class="quiz-section">
+    <div class="quiz-header">Retrieval practice — 3 questions</div>
+    <p style="font-family: var(--sans); font-size: 0.85rem; color: var(--muted); margin-bottom: 1.5rem;">Answer from memory. Resist scrolling up — the effort is the point.</p>
+
+    <div class="quiz-question" data-correct="row">
+      <div class="quiz-q"><span class="q-num">1.</span> In a relational database, a single user record is called a:</div>
+      <div class="quiz-options">
+        <button class="quiz-option" data-value="row">Row in a table</button>
+        <button class="quiz-option" data-value="node">Node in a graph</button>
+        <button class="quiz-option" data-value="key">Key in an index</button>
+        <button class="quiz-option" data-value="doc">Doc in a store</button>
+      </div>
+      <button class="quiz-check">Check answer</button>
+      <div class="quiz-feedback correct">Correct. In SQL databases, each record is a row. Collections of rows form a table. In MongoDB terms: a row ≈ a document, a table ≈ a collection — but with an enforced shape.</div>
+      <div class="quiz-feedback incorrect">Not quite. In SQL, each record is a row inside a table. You may know this as a "document" from MongoDB — the concept is the same (one record), but in PostgreSQL it's called a row and must conform to the table's schema.</div>
+    </div>
+
+    <div class="quiz-question" data-correct="must-exist">
+      <div class="quiz-q"><span class="q-num">2.</span> A <code>REFERENCES</code> constraint (foreign key) enforces that:</div>
+      <div class="quiz-options">
+        <button class="quiz-option" data-value="must-exist">A referenced row must exist</button>
+        <button class="quiz-option" data-value="unique">A column value stays unique</button>
+        <button class="quiz-option" data-value="primary">A table has a primary row</button>
+        <button class="quiz-option" data-value="notnull">A schema has no null rows</button>
+      </div>
+      <button class="quiz-check">Check answer</button>
+      <div class="quiz-feedback correct">Correct. A foreign key means "this value must point to a real row in another table." PostgreSQL enforces this on every insert and update — you cannot have a membership for a user that doesn't exist.</div>
+      <div class="quiz-feedback incorrect">Not quite. REFERENCES is a foreign key constraint — it enforces that a value in one table (like user_id) corresponds to a real row in another table (users). UNIQUE handles uniqueness; NOT NULL handles non-empty columns.</div>
+    </div>
+
+    <div class="quiz-question" data-correct="shape">
+      <div class="quiz-q"><span class="q-num">3.</span> PostgreSQL's schema enforcement guarantees that:</div>
+      <div class="quiz-options">
+        <button class="quiz-option" data-value="shape">Every row matches the defined shape</button>
+        <button class="quiz-option" data-value="unique">Every document stores a unique key</button>
+        <button class="quiz-option" data-value="sorted">Every query returns sorted results</button>
+        <button class="quiz-option" data-value="index">Every table has an integer index</button>
+      </div>
+      <button class="quiz-check">Check answer</button>
+      <div class="quiz-feedback correct">Correct. Schema enforcement means every row must match the table's defined shape — the right columns, the right types, all constraints satisfied. This is what MongoDB's flexible schema deliberately does not enforce.</div>
+      <div class="quiz-feedback incorrect">Not quite. Schema enforcement means every row inserted or updated must match the table's definition — correct column types, no nulls where NOT NULL is set, unique values where UNIQUE is set. It's a structural guarantee about your data's shape.</div>
+    </div>
+
+    <div class="quiz-score"></div>
+  </div>
+
+  <hr class="divider">
+
+  <div class="primary-source">
+    <div class="primary-source-label">Recommended primary source</div>
+    <a href="https://www.postgresql.org/docs/current/ddl.html" target="_blank" rel="noopener">PostgreSQL Docs — Chapter 5: Data Definition</a>
+    <p>The official reference for tables, columns, constraints, and defaults. Dense but authoritative — scan sections 5.1 (table basics) and 5.4 (constraints) to reinforce what this lesson covered. Everything here will be used in your real schema.</p>
+  </div>
+
+  <div class="ask-teacher">
+    <strong>Questions? Ask your teacher.</strong>
+    If the difference between primary keys and foreign keys isn't clicking, or you want to see how this maps to a real feature in your app — bring it to your next session. Your teacher can walk through a concrete example from your own product.
+  </div>
+
+  <div class="lesson-nav">
+    <a href="0001-the-database-landscape.html">← Lesson 1: The Database Landscape</a>
+    <a href="0003-your-first-sql.html">Lesson 3: Your First SQL →</a>
+  </div>
+
+  <footer>
+    PostgreSQL for SaaS &nbsp;·&nbsp; Lesson 2 &nbsp;·&nbsp;
+    <a href="../index.html">Course index</a>
+  </footer>
+
+</div>
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

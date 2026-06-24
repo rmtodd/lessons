@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lesson 5 — PostgreSQL's Superpowers</title>
+  <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<div class="page">
+
+  <div class="breadcrumb">
+    <a href="../index.html">PostgreSQL for SaaS</a>
+    <span>Lesson 5</span>
+  </div>
+
+  <header>
+    <div class="lesson-meta">Lesson 5 of 5 &nbsp;·&nbsp; Advanced Foundations</div>
+    <h1>PostgreSQL's Superpowers</h1>
+    <p class="subtitle">ACID transactions, JSONB, essential data types, and the extensions that make PostgreSQL the SaaS default</p>
+    <div class="lesson-stats">
+      <span>⏱ ~20 minutes</span>
+      <span>📖 Read + quiz</span>
+      <span>🎯 PostgreSQL-specific</span>
+    </div>
+  </header>
+
+  <p>Every relational database gives you tables, SQL, and constraints. This lesson is about what PostgreSQL adds on top — the features that put it ahead of MySQL for SaaS, and that make it compete with NoSQL databases in flexibility while retaining everything relational.</p>
+
+  <!-- ── ACID ─── -->
+  <h2>ACID transactions: the foundation of trust</h2>
+
+  <p>PostgreSQL is an <strong>ACID-compliant</strong> database. ACID is a set of guarantees about what happens when your application reads and writes data — especially when things go wrong.</p>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>Property</th><th>What it guarantees</th><th>SaaS example</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>Atomicity</strong></td>
+          <td>All operations in a transaction succeed, or none do</td>
+          <td>Charge a card and create an invoice — if the invoice creation fails, the charge doesn't complete</td>
+        </tr>
+        <tr>
+          <td><strong>Consistency</strong></td>
+          <td>Every transaction brings the database from one valid state to another</td>
+          <td>A subscription can't be active without a valid plan reference — constraints are always satisfied</td>
+        </tr>
+        <tr>
+          <td><strong>Isolation</strong></td>
+          <td>Concurrent transactions don't see each other's in-progress changes</td>
+          <td>Two API requests updating the same org's subscription at the same moment don't corrupt each other</td>
+        </tr>
+        <tr>
+          <td><strong>Durability</strong></td>
+          <td>Committed data survives crashes and power failures</td>
+          <td>Once a subscription is committed, it's on disk — a server crash doesn't lose it</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Transactions in practice</h3>
+
+  <p>You group multiple operations into a transaction with <code>BEGIN</code> / <code>COMMIT</code>. If anything fails, <code>ROLLBACK</code> undoes everything:</p>
+
+  <pre><span class="kw">BEGIN</span>;
+
+<span class="cmt">-- Upgrade the org to the Pro plan</span>
+<span class="kw">UPDATE</span> subscriptions
+<span class="kw">SET</span> plan_id = <span class="str">'pro-plan-uuid'</span>, status = <span class="str">'active'</span>
+<span class="kw">WHERE</span> org_id = <span class="str">'acme-org-uuid'</span>;
+
+<span class="cmt">-- Record the upgrade event</span>
+<span class="kw">INSERT INTO</span> subscription_events (org_id, event, occurred_at)
+<span class="kw">VALUES</span> (<span class="str">'acme-org-uuid'</span>, <span class="str">'upgraded_to_pro'</span>, <span class="fn">now</span>());
+
+<span class="kw">COMMIT</span>; <span class="cmt">-- Both succeed, or neither does</span></pre>
+
+  <p>In practice, your application framework wraps this automatically — but understanding what's underneath makes you a better debugger when things go wrong.</p>
+
+  <div class="callout">
+    <div class="callout-label">Firebase/Firestore comparison</div>
+    <p>Firestore has had multi-document transactions since 2018, but they're limited to 500 documents and require careful client-side handling. PostgreSQL transactions are unlimited, server-enforced, and work transparently across all your tables.</p>
+  </div>
+
+  <!-- ── Data types ─── -->
+  <h2>Essential data types for SaaS</h2>
+
+  <p>PostgreSQL has a richer type system than most databases. Here are the ones you'll use constantly:</p>
+
+  <h3>UUID — globally unique IDs</h3>
+  <pre><span class="kw">ALTER TABLE</span> users <span class="kw">ADD COLUMN</span> id <span class="typ">UUID</span> <span class="kw">PRIMARY KEY DEFAULT</span> <span class="fn">gen_random_uuid</span>();</pre>
+  <p>UUIDs are safe to expose in URLs (unlike sequential integers, which leak your scale and are easy to enumerate). <code>gen_random_uuid()</code> generates a cryptographically random UUID v4. No coordination required across servers — two instances can generate IDs simultaneously without collision.</p>
+
+  <h3>TIMESTAMPTZ — time with timezone</h3>
+  <pre><span class="cmt">-- Always use TIMESTAMPTZ, never plain TIMESTAMP</span>
+created_at <span class="typ">TIMESTAMPTZ</span> <span class="kw">NOT NULL DEFAULT</span> <span class="fn">now</span>()</pre>
+  <p><code>TIMESTAMPTZ</code> stores the moment in time as UTC internally, regardless of the timezone of the inserting application. <code>TIMESTAMP</code> stores no timezone info — if your server changes timezone or you have users in multiple regions, you get silent data corruption. Always use <code>TIMESTAMPTZ</code>.</p>
+
+  <h3>TEXT vs VARCHAR</h3>
+  <p>In PostgreSQL, <code>TEXT</code> and <code>VARCHAR</code> have identical storage and performance. Use <code>TEXT</code> by default. Use <code>VARCHAR(n)</code> only when you genuinely need a length constraint — and even then, a <code>CHECK</code> constraint is often more descriptive:</p>
+  <pre>slug <span class="typ">TEXT</span> <span class="kw">NOT NULL CHECK</span> (<span class="fn">length</span>(slug) <span class="kw">BETWEEN</span> <span class="num">3</span> <span class="kw">AND</span> <span class="num">50</span>)</pre>
+
+  <h3>BOOLEAN</h3>
+  <pre>email_verified <span class="typ">BOOLEAN</span> <span class="kw">NOT NULL DEFAULT</span> <span class="kw">false</span></pre>
+  <p>True or false. PostgreSQL accepts <code>true/false</code>, <code>'t'/'f'</code>, <code>1/0</code>. Prefer explicit <code>NOT NULL DEFAULT false</code> — a NULL boolean ("unknown") is almost never what you want in SaaS data.</p>
+
+  <!-- ── JSONB ─── -->
+  <h2>JSONB: the bridge to your NoSQL instincts</h2>
+
+  <p>PostgreSQL's <code>JSONB</code> type stores arbitrary JSON in a binary format that is compressed, indexed, and fully queryable with operators. It's the best of both worlds: relational structure where you need it, document flexibility where you don't.</p>
+
+  <h3>Storing JSONB</h3>
+  <pre><span class="kw">ALTER TABLE</span> users <span class="kw">ADD COLUMN</span> metadata <span class="typ">JSONB</span>;</pre>
+
+  <pre><span class="kw">UPDATE</span> users
+<span class="kw">SET</span> metadata = <span class="str">'{"plan_source": "referral", "referrer_id": "u_abc123"}'</span>::<span class="typ">jsonb</span>
+<span class="kw">WHERE</span> id = <span class="str">'...'</span>;</pre>
+
+  <h3>Querying JSONB</h3>
+  <pre><span class="cmt">-- Get a field from JSONB with ->></span>
+<span class="kw">SELECT</span> metadata->><span class="str">'plan_source'</span> <span class="kw">FROM</span> users;
+
+<span class="cmt">-- Filter on a JSONB field</span>
+<span class="kw">SELECT</span> name, email <span class="kw">FROM</span> users
+<span class="kw">WHERE</span> metadata->><span class="str">'plan_source'</span> = <span class="str">'referral'</span>;
+
+<span class="cmt">-- Check if a key exists</span>
+<span class="kw">SELECT</span> * <span class="kw">FROM</span> users <span class="kw">WHERE</span> metadata ? <span class="str">'referrer_id'</span>;</pre>
+
+  <h3>Indexing JSONB</h3>
+  <pre><span class="cmt">-- Index a specific JSONB path (fast lookups)</span>
+<span class="kw">CREATE INDEX ON</span> users (( metadata->><span class="str">'plan_source'</span> ));
+
+<span class="cmt">-- GIN index for full JSONB containment queries</span>
+<span class="kw">CREATE INDEX ON</span> users <span class="kw">USING GIN</span> (metadata);</pre>
+
+  <div class="callout">
+    <div class="callout-label">When to reach for JSONB</div>
+    <p>Good uses: per-user settings or feature flags, third-party webhook payloads you need to store but don't query on, metadata that varies by user type. Avoid for: data you frequently JOIN on, data you sort or aggregate — structured columns are better there. JSONB is the escape hatch, not the default.</p>
+  </div>
+
+  <!-- ── Extensions ─── -->
+  <h2>Extensions: PostgreSQL's superpower</h2>
+
+  <p>PostgreSQL's extension system lets you add capabilities that other databases need entirely separate services for. Install with <code>CREATE EXTENSION</code>:</p>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>Extension</th><th>What it adds</th><th>SaaS use case</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>pgcrypto</code></td>
+          <td><code>gen_random_uuid()</code>, hashing, encryption</td>
+          <td>UUID generation, storing hashed API keys</td>
+        </tr>
+        <tr>
+          <td><code>pg_trgm</code></td>
+          <td>Trigram-based fuzzy text search</td>
+          <td>"Did you mean?" search, typo-tolerant search bars</td>
+        </tr>
+        <tr>
+          <td><code>unaccent</code></td>
+          <td>Accent-insensitive text search</td>
+          <td>Search "cafe" and find "café"</td>
+        </tr>
+        <tr>
+          <td><code>pgvector</code></td>
+          <td>Vector similarity search</td>
+          <td>Semantic search, AI embeddings, recommendations</td>
+        </tr>
+        <tr>
+          <td><code>PostGIS</code></td>
+          <td>Geospatial types and queries</td>
+          <td>"Find all users within 50km of this point"</td>
+        </tr>
+        <tr>
+          <td><code>pg_stat_statements</code></td>
+          <td>Query performance tracking</td>
+          <td>Find slow queries in production</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <pre><span class="cmt">-- Enable extensions (usually done once during setup)</span>
+<span class="kw">CREATE EXTENSION IF NOT EXISTS</span> pgcrypto;
+<span class="kw">CREATE EXTENSION IF NOT EXISTS</span> pg_trgm;
+<span class="kw">CREATE EXTENSION IF NOT EXISTS</span> vector;  <span class="cmt">-- pgvector</span></pre>
+
+  <p>Most managed PostgreSQL platforms (Supabase, Neon, RDS) have the common extensions pre-installed — you just <code>CREATE EXTENSION</code> to enable them.</p>
+
+  <!-- ── Why this matters ─── -->
+  <h2>Why this all matters for your SaaS</h2>
+
+  <p>Stack these features together and the picture becomes clear:</p>
+
+  <ul>
+    <li><strong>Transactions</strong> protect your billing logic from partial failures — the most dangerous failure mode in a SaaS product.</li>
+    <li><strong>JSONB</strong> handles per-user settings, feature flags, and third-party payload storage without needing a separate document database.</li>
+    <li><strong>UUID + TIMESTAMPTZ</strong> give you IDs that are safe to expose and timestamps that survive timezone edge cases.</li>
+    <li><strong>Extensions</strong> let your PostgreSQL database grow with your product — add semantic search when you build an AI feature, geospatial when you go international, without introducing a new database to operate.</li>
+  </ul>
+
+  <p>One well-configured PostgreSQL instance can replace multiple specialist services for most early-stage SaaS products. That's the real reason experienced engineers recommend it as the default.</p>
+
+  <hr class="divider">
+
+  <!-- ── Quiz ─── -->
+  <div class="quiz-section">
+    <div class="quiz-header">Retrieval practice — 3 questions</div>
+    <p style="font-family: var(--sans); font-size: 0.85rem; color: var(--muted); margin-bottom: 1.5rem;">Final retrieval practice for this lesson series. Answer from memory — if it feels hard, that's working as intended.</p>
+
+    <div class="quiz-question" data-correct="rollback">
+      <div class="quiz-q"><span class="q-num">1.</span> If a PostgreSQL transaction fails partway through, what happens to the changes made so far?</div>
+      <div class="quiz-options">
+        <button class="quiz-option" data-value="rollback">All changes are rolled back</button>
+        <button class="quiz-option" data-value="partial">Half the changes are saved</button>
+        <button class="quiz-option" data-value="stays">Each change stays in place</button>
+        <button class="quiz-option" data-value="last">The last change gets saved</button>
+      </div>
+      <button class="quiz-check">Check answer</button>
+      <div class="quiz-feedback correct">Correct. Atomicity — the A in ACID — guarantees that a transaction is all-or-nothing. If any part fails, PostgreSQL rolls back all changes from that transaction, leaving the database exactly as it was before the transaction started.</div>
+      <div class="quiz-feedback incorrect">Not quite. Atomicity (the A in ACID) means a transaction is all-or-nothing. If the subscription update succeeds but the invoice insert fails, PostgreSQL rolls back the subscription update too. You never get a half-complete state.</div>
+    </div>
+
+    <div class="quiz-question" data-correct="jsonb">
+      <div class="quiz-q"><span class="q-num">2.</span> PostgreSQL's JSONB type lets you:</div>
+      <div class="quiz-options">
+        <button class="quiz-option" data-value="jsonb">Store flexible JSON in a column</button>
+        <button class="quiz-option" data-value="replace">Replace the relational table model</button>
+        <button class="quiz-option" data-value="export">Export your database as JSON</button>
+        <button class="quiz-option" data-value="skip">Skip writing migrations entirely</button>
+      </div>
+      <button class="quiz-check">Check answer</button>
+      <div class="quiz-feedback correct">Correct. JSONB is a column type that stores arbitrary JSON — indexed and queryable — inside a regular PostgreSQL table. You get relational structure for the columns you define, and document-style flexibility for the JSONB column. It's not a replacement for the relational model, it's an addition to it.</div>
+      <div class="quiz-feedback incorrect">Not quite. JSONB is a column type — it adds a flexible, queryable JSON column to a regular relational table. It's not a wholesale replacement for SQL or the relational model; it's a bridge that lets you handle variable-shape data without leaving PostgreSQL.</div>
+    </div>
+
+    <div class="quiz-question" data-correct="tz">
+      <div class="quiz-q"><span class="q-num">3.</span> Why is TIMESTAMPTZ preferred over TIMESTAMP for SaaS applications?</div>
+      <div class="quiz-options">
+        <button class="quiz-option" data-value="tz">It stores the moment in time correctly regardless of timezone</button>
+        <button class="quiz-option" data-value="speed">It runs faster than plain timestamp columns do</button>
+        <button class="quiz-option" data-value="string">It accepts strings like relative date values instead</button>
+        <button class="quiz-option" data-value="local">It converts dates to each user's local time</button>
+      </div>
+      <button class="quiz-check">Check answer</button>
+      <div class="quiz-feedback correct">Correct. TIMESTAMPTZ stores the absolute moment in UTC internally, regardless of the timezone of the inserting application. TIMESTAMP stores no timezone info — if your server's timezone changes, or you run servers in multiple regions, TIMESTAMP values become ambiguous. TIMESTAMPTZ is unambiguous.</div>
+      <div class="quiz-feedback incorrect">Not quite. The reason is correctness across timezones. TIMESTAMPTZ stores the moment as UTC internally — so whether your server is in UTC, US/Eastern, or Asia/Tokyo, the stored value means the same thing. Plain TIMESTAMP has no timezone info and becomes ambiguous when server timezones change.</div>
+    </div>
+
+    <div class="quiz-score"></div>
+  </div>
+
+  <hr class="divider">
+
+  <div class="primary-source">
+    <div class="primary-source-label">Recommended primary source</div>
+    <a href="https://www.postgresql.org/docs/current/functions-json.html" target="_blank" rel="noopener">PostgreSQL Docs — JSON Functions and Operators</a>
+    <p>The complete reference for JSONB operators (<code>-&gt;</code>, <code>-&gt;&gt;</code>, <code>@&gt;</code>, <code>?</code>) and functions. Bookmark this page — you'll return to it whenever you work with JSONB in production. The examples are clear and comprehensive.</p>
+  </div>
+
+  <div class="ask-teacher">
+    <strong>Questions? Ask your teacher.</strong>
+    You've now covered the full foundations of PostgreSQL for SaaS — the landscape, the relational model, SQL, schema design, and PostgreSQL's specific strengths. Bring your actual product's data model to the next session and your teacher can help you design your real schema, identify where JSONB might help, and think through your transaction boundaries.
+  </div>
+
+  <div class="lesson-nav">
+    <a href="0004-schema-design-for-saas.html">← Lesson 4: Schema Design</a>
+    <span style="color: var(--muted); font-size: 0.85rem;">More lessons coming →</span>
+  </div>
+
+  <footer>
+    PostgreSQL for SaaS &nbsp;·&nbsp; Lesson 5 &nbsp;·&nbsp;
+    <a href="../index.html">Course index</a>
+  </footer>
+
+</div>
+<script src="../assets/quiz.js"></script>
+</body>
+</html>
