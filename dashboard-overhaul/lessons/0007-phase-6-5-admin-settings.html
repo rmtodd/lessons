@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Phase 6.5 — Admin Settings</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<p class="kicker">Lesson 7 of 10 · Dashboard Overhaul</p>
+<h1>Phase 6.5 — Admin Settings</h1>
+<p><span class="status-future">Not started</span> — planned duration ~3–4 days. Notice the "6.5" numbering: this phase was inserted into the plan <em>after</em> the original numbering was set, because the team recognized a real gap mid-plan (see below) — the half-number just means "this slots in right after Phase 6, added later."</p>
+
+<h2>The one-sentence version</h2>
+<p>Move the dozen-plus behavioral knobs that currently live as Railway environment variables (frozen in place until someone redeploys the whole application) into the database instead, so an admin can tune them — like "how often should we check for new presales" or "which AI model should extract 15G filings" — directly from the Settings screen, and have the change take effect within about 30 seconds, with no deploy at all.</p>
+
+<h2>Why this phase exists</h2>
+<p>Today, every behavioral setting in CMBSDOCS — how often the presale scraper runs, whether it should run on weekends, which specific AI model does 15G extraction — is a Railway "environment variable": a piece of configuration baked in at the moment the application starts up. Changing any of them means editing that configuration and <strong>redeploying the entire application</strong> — a real, if small, amount of downtime risk and delay, for what's often a one-line behavioral tweak.</p>
+<div class="analogy">
+<span class="label">Analogy</span>
+Today, changing the thermostat setting means turning off the whole building's power, rewiring the thermostat, and turning the power back on. This phase installs an actual thermostat dial on the wall — the building stays running the whole time, and the new setting takes effect within moments.
+</div>
+<p>Crucially, the plan draws a firm line about <em>what doesn't move</em>: actual secrets (API keys, encryption keys, database URLs) and safety-critical settings (like whether authentication is required at all) <strong>stay in Railway</strong>, never in the database. This phase is only about <em>behavioral</em> knobs — schedules, feature toggles, model choices — not security posture or credentials. That's a deliberate, important boundary: a setting whose whole point is "must survive even if the database is down or compromised" (like <code>REQUIRE_AUTH</code>) cannot itself live inside the thing it's meant to protect against.</p>
+
+<h2>How the "no redeploy needed" trick actually works</h2>
+<p>The recon behind this phase (done as part of this same phase's planning) found something useful: every background loop in the system <em>already</em> re-reads its own "am I enabled" flag and its own interval fresh on every single cycle — nothing in the existing code assumes those values are fixed forever. The <em>only</em> place a setting actually gets "frozen" is a handful of one-time startup checks like <code>if enabled: create_task(...)</code> — meaning "only ever start this background loop at all if the setting was true the moment the app booted."</p>
+<p>So the actual engineering change is smaller than it sounds:</p>
+<ul>
+<li>Delete those one-time startup gates — <strong>always</strong> start every loop, unconditionally.</li>
+<li>Add a small helper, <code>get_setting(key, default, cast)</code>, that checks (in order): is there a row for this key in the new <code>app_settings</code> table? If not, fall back to the existing environment variable. If that's also absent, fall back to the code's built-in default.</li>
+<li>When a loop is "disabled" via this new setting, instead of not running at all, it just sleeps for a short, capped interval (30 seconds or its normal interval, whichever is shorter) and checks again — so flipping it back on is felt almost immediately, not after the next full interval.</li>
+</ul>
+<div class="callout win">
+<span class="label">Why a 30-second cache, not instant</span>
+Rather than have every single loop iteration hit the database to check a setting, the helper caches each value in memory for 30 seconds per running process. This means a change can take up to 30 seconds to be felt by any one process, and — since there are multiple separate processes running (the web server, the scheduler, the workers) — they might briefly disagree with each other for a few seconds. The plan accepts this small, bounded staleness deliberately, because it avoids hammering the database with a query on every loop tick, and 30 seconds of lag is a non-issue for settings like "should we scrape on weekends."
+</div>
+<p>There's also an explicit fail-open rule: if the database is briefly unreachable when a setting is checked, the code logs a warning and falls back to the already-known-good value (env var or default) rather than crashing the loop. A settings outage should never take down the whole ingestion pipeline.</p>
+
+<h2>Why this needs its own registry too (déjà vu, on purpose)</h2>
+<p>Just like Phase 4's field registry controls which data fields can be overridden, this phase adds a parallel <code>SettingSpec</code> registry — one entry per setting, describing its type, valid range, and default. The Settings screen renders its whole form generically off this registry, the same way the override system's UI renders generically off the field registry. Recognizing "we've already solved this shape of problem once" and reusing the same pattern, rather than inventing a new one, is a mark of a well-organized codebase.</p>
+
+<h2>What's actually configurable, and the validation attached to each</h2>
+<p>The plan groups the roughly 20 real settings into four buckets — worth knowing the shape, not memorizing every key:</p>
+<table>
+<tr><th>Group</th><th>Examples</th><th>Why validation matters here</th></tr>
+<tr><td>Scraping &amp; schedules</td><td>How often to check presales, whether to include weekends, what hours EDGAR polling runs</td><td>An interval set too low (e.g. every second) could hammer an external agency's website — a minimum floor (e.g. 300 seconds) is enforced.</td></tr>
+<tr><td>LLM models</td><td>Which model does 15G extraction, which does presale matching</td><td>Only real, known model names are accepted — an admin can't accidentally type a typo'd model name that fails silently at 2am.</td></tr>
+<tr><td>Monitoring</td><td>Circuit-breaker error threshold, task expiry window</td><td>Bounded ranges prevent an admin from, say, setting the circuit breaker to "never trip," which would defeat its whole purpose.</td></tr>
+<tr><td>Integrations</td><td>Which agencies route through Browser-Use, estimated cost per task</td><td>Feeds directly into the Phase 3 cost-estimate logic — a wrong value here quietly skews the whole Costs screen.</td></tr>
+</table>
+
+<h2>Check your understanding</h2>
+<div class="quiz" data-correct="0">
+<div class="q">Why does the plan insist that things like `REQUIRE_AUTH` and database credentials stay in Railway environment variables, never in this new database-backed settings system?</div>
+<div class="options">
+<button class="opt">Because a setting that protects against a database outage or compromise cannot itself depend on the database being safe and reachable — otherwise the exact failure it's meant to guard against would also disable the guard</button>
+<button class="opt">Because Railway environment variables are cheaper to store than database rows</button>
+<button class="opt">Because the `app_settings` table has a hard limit of 20 rows</button>
+</div>
+<div class="feedback">This is a "who guards the guards" problem: a security-critical setting has to live somewhere independent of the exact systems it's meant to protect against failing. Behavioral tuning knobs (schedules, model choices) don't have that constraint, which is exactly why they're the ones that moved.</div>
+</div>
+
+<h2>Recommended primary source</h2>
+<p>There isn't a single canonical external doc for "runtime feature flags with env-var fallback" — it's a common but informally-documented pattern. The closest useful primary-source framing is Martin Fowler's classic article <a href="https://martinfowler.com/articles/feature-toggles.html" target="_blank" rel="noopener">"Feature Toggles (aka Feature Flags)"</a>, which covers the general idea of runtime-configurable behavior this phase is a specific instance of.</p>
+
+<p class="ask-agent">If the "DB > env > default" precedence order feels fuzzy, ask your teaching agent to trace one specific setting (e.g. the 15G extraction model) through all three fallback layers with concrete example values.</p>
+
+<div class="phase-nav">
+<a href="0006-phase-6-wire-writes.html">← Phase 6 — Wire Writes</a>
+<a href="0008-phase-7-versioning-documents.html">Next: Phase 7 — Versioning + Documents →</a>
+</div>
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

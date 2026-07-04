@@ -1,0 +1,105 @@
+/* Shared stylesheet for the CMBSDOCS Dashboard Overhaul teaching workspace. Tufte-ish: generous margins, serif body text, sparing color, wide sidenotes for asides. */
+
+:root {
+  --bg: #fbfaf7;
+  --fg: #1a1a1a;
+  --muted: #5c5c5c;
+  --rule: #d8d3c8;
+  --accent: #8a3b2b;
+  --accent-bg: #f4e9e2;
+  --code-bg: #f0ede6;
+  --win-bg: #eaf1e6;
+  --win-border: #6f9a5c;
+  --warn-bg: #fbeee0;
+  --warn-border: #c07a2e;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #17181a;
+    --fg: #e8e5df;
+    --muted: #a3a099;
+    --rule: #3a3a38;
+    --accent: #e0a08c;
+    --accent-bg: #2b211d;
+    --code-bg: #232320;
+    --win-bg: #1f2a1c;
+    --win-border: #4d7a3c;
+    --warn-bg: #2c2318;
+    --warn-border: #a8703a;
+  }
+}
+
+:root[data-theme="light"] {
+  --bg: #fbfaf7; --fg: #1a1a1a; --muted: #5c5c5c; --rule: #d8d3c8;
+  --accent: #8a3b2b; --accent-bg: #f4e9e2; --code-bg: #f0ede6;
+  --win-bg: #eaf1e6; --win-border: #6f9a5c; --warn-bg: #fbeee0; --warn-border: #c07a2e;
+}
+:root[data-theme="dark"] {
+  --bg: #17181a; --fg: #e8e5df; --muted: #a3a099; --rule: #3a3a38;
+  --accent: #e0a08c; --accent-bg: #2b211d; --code-bg: #232320;
+  --win-bg: #1f2a1c; --win-border: #4d7a3c; --warn-bg: #2c2318; --warn-border: #a8703a;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+  font-size: 19px;
+  line-height: 1.6;
+  max-width: 780px;
+  margin: 0 auto;
+  padding: 3rem 1.5rem 6rem;
+}
+
+h1, h2, h3, h4 { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-weight: 700; line-height: 1.25; }
+h1 { font-size: 2rem; margin-bottom: 0.2rem; }
+.kicker { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; text-transform: uppercase; letter-spacing: 0.08em; font-size: 0.8rem; color: var(--accent); font-weight: 700; margin-bottom: 0.5rem; }
+h2 { font-size: 1.4rem; margin-top: 3rem; border-bottom: 1px solid var(--rule); padding-bottom: 0.3rem; }
+h3 { font-size: 1.1rem; margin-top: 2rem; color: var(--accent); }
+
+p, li { max-width: 68ch; }
+a { color: var(--accent); text-decoration-thickness: 1px; }
+
+code, pre, .mono { font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 0.85em; }
+code { background: var(--code-bg); padding: 0.1em 0.35em; border-radius: 3px; }
+pre { background: var(--code-bg); padding: 1rem; border-radius: 6px; overflow-x: auto; border: 1px solid var(--rule); }
+pre code { background: none; padding: 0; }
+
+blockquote { border-left: 3px solid var(--accent); margin-left: 0; padding-left: 1rem; color: var(--muted); font-style: italic; }
+
+.callout { border-radius: 8px; padding: 1rem 1.2rem; margin: 1.5rem 0; border: 1px solid var(--rule); }
+.callout.win { background: var(--win-bg); border-color: var(--win-border); }
+.callout.warn { background: var(--warn-bg); border-color: var(--warn-border); }
+.callout .label { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-weight: 700; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; display: block; margin-bottom: 0.4rem; }
+
+.analogy { background: var(--accent-bg); border-radius: 8px; padding: 1rem 1.2rem; margin: 1.5rem 0; }
+.analogy .label { font-weight: 700; color: var(--accent); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; display: block; margin-bottom: 0.4rem; }
+
+table { border-collapse: collapse; width: 100%; margin: 1.5rem 0; font-size: 0.92rem; }
+th, td { border-bottom: 1px solid var(--rule); padding: 0.5rem 0.7rem; text-align: left; vertical-align: top; }
+th { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+
+.status-done { color: var(--win-border); font-weight: 700; }
+.status-next { color: var(--accent); font-weight: 700; }
+.status-future { color: var(--muted); }
+
+.phase-nav { display: flex; justify-content: space-between; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-size: 0.85rem; margin: 3rem 0 1rem; padding-top: 1rem; border-top: 1px solid var(--rule); }
+.phase-nav a { text-decoration: none; }
+
+.quiz { background: var(--code-bg); border: 1px solid var(--rule); border-radius: 8px; padding: 1.2rem; margin: 1.5rem 0; }
+.quiz .q { font-weight: 700; margin-bottom: 0.6rem; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+.quiz .options { display: flex; flex-direction: column; gap: 0.5rem; }
+.quiz button.opt { text-align: left; padding: 0.6rem 0.8rem; border-radius: 6px; border: 1px solid var(--rule); background: var(--bg); color: var(--fg); font-family: inherit; font-size: 0.95rem; cursor: pointer; }
+.quiz button.opt:hover { border-color: var(--accent); }
+.quiz button.opt.correct { background: var(--win-bg); border-color: var(--win-border); }
+.quiz button.opt.wrong { background: var(--warn-bg); border-color: var(--warn-border); }
+.quiz .feedback { margin-top: 0.7rem; font-size: 0.9rem; display: none; }
+.quiz .feedback.show { display: block; }
+
+.ask-agent { font-size: 0.9rem; color: var(--muted); border-top: 1px dashed var(--rule); margin-top: 3rem; padding-top: 1rem; }
+
+.toc { background: var(--code-bg); border-radius: 8px; padding: 1rem 1.5rem; font-size: 0.9rem; }
+.toc a { display: block; padding: 0.15rem 0; text-decoration: none; }

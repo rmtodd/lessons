@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Phase 7 — Versioning + Documents</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<p class="kicker">Lesson 8 of 10 · Dashboard Overhaul</p>
+<h1>Phase 7 — Versioning + Documents</h1>
+<p><span class="status-future">Not started</span> — planned duration ~1 week.</p>
+
+<h2>The one-sentence version</h2>
+<p>Stop treating every document CMBSDOCS downloads as a single, disposable snapshot that gets silently overwritten the next time a newer version of the same document shows up — instead, keep every version, tag each one (pre-marketing draft, RED, BLACK, final), and let a human mark which one is "current" without losing the older ones.</p>
+
+<h2>Why this phase exists</h2>
+<p>CMBS deals typically go through a sequence of offering-document drafts before the final version — informally called "pre-marketing," "RED" (a preliminary version, traditionally printed with red disclaimer text), and "BLACK" (the final version). Today, CMBSDOCS has <strong>no concept of document versions at all</strong>: the database's uniqueness rule for documents is just "one row per (deal, source, URL)," so when a newer draft of the same document appears, it simply overwrites the one row that existed before. The RED draft is gone the moment the BLACK version is parsed — and so is any human correction that was attached to the RED version's extracted data.</p>
+<div class="analogy">
+<span class="label">Analogy</span>
+Imagine a shared folder where every time someone saves a newer draft of a contract, it silently replaces the old file under the exact same filename — no "Draft_v1," no version history, just gone. Anyone who'd left comments on the old draft loses them with zero warning. This phase is the shared folder finally getting "Save As" and a version history pane.
+</div>
+
+<h2>The design: version groups, not just version numbers</h2>
+<p>The fix adds two ideas to the <code>deal_documents</code> table:</p>
+<ul>
+<li><strong>A version group</strong> (<code>document_group_id</code>) — every draft of logically the <em>same</em> document (pre-marketing → RED → BLACK) shares one group ID. A new version is a brand-new row, in the same group, rather than an edit to the old row. The old row, and anything overridden on it, stays untouched forever.</li>
+<li><strong>A "current version" flag</strong> (<code>is_current_version</code>) — exactly one row per group is marked current at any time (enforced by a special kind of uniqueness rule — a "partial unique index" — that only applies to rows where this flag is true). This is what the UI shows by default, with older versions available behind a "3 versions" expander.</li>
+</ul>
+<p>One more distinction worth being precise about, because it's easy to conflate: <strong>variants are not versions.</strong> The same deal might have both a "P&amp;I" (principal and interest) and an "IO" (interest-only) version of a term sheet — those are two genuinely <em>different</em> documents that happen to exist side by side, not two drafts of one evolving document. The plan keeps these as separate sibling groups, each with their own version history, rather than lumping them together.</p>
+
+<h3>The annex fix — a version needs its own extracted data too</h3>
+<p>A specific, subtler case: CMBSDOCS parses "Annex A" tables (structured loan-level data) out of these documents. Previously, re-parsing an annex just overwrote the single existing set of rows. Now, each parsed version of an annex gets its own document row, and the extracted table rows (<code>annex_a_rows</code>) link to <em>that specific version's</em> row — so re-parsing the RED version's annex doesn't touch the BLACK version's already-parsed (and possibly human-corrected) rows at all. A same-version re-parse (e.g. re-running extraction on an unchanged document) still goes through the Phase 4 <a href="../reference/glossary.html#guard">guard</a>, so it won't clobber human overrides either.</p>
+
+<h2>Where this phase collides with Phase 4's known "sharp edge"</h2>
+<p>Recall from the Phase 4 lesson: nested JSONB overrides are "best-effort" — an override on a deeply nested field silently does nothing if its parent object doesn't already exist in the blob. Phase 7 is explicitly flagged in the plan as the point where this stops being a theoretical concern: it's the <strong>first phase to actually register overridable fields that live inside nested JSONB</strong> (annex attributes, richer eval-schema fields). Before any such field gets registered, the plan calls for either teaching the write-through code to build the missing nested structure as it goes (a "deep merge"), or guaranteeing the parent object is always present to begin with. This is a good example of a team tracking a known limitation forward across phases instead of forgetting about it until it causes a real, silent bug in production.</p>
+
+<div class="callout warn">
+<span class="label">Why this is worth flagging as a reader, not just a developer</span>
+If you ever hear that "an override on an annex field didn't seem to take effect," this is the specific, named mechanism to ask about first — it's a documented, anticipated risk, not a mystery bug.
+</div>
+
+<h2>Check your understanding</h2>
+<div class="quiz" data-correct="2">
+<div class="q">Why are a P&I version and an IO version of the same term sheet modeled as two separate "sibling groups," not as two versions inside one group?</div>
+<div class="options">
+<button class="opt">Because the database can't have two rows with the same deal ID</button>
+<button class="opt">Because IO documents are always uploaded after P&I documents</button>
+<button class="opt">Because they're genuinely two different documents that coexist at the same time — a "version" means successive drafts of the *same* document over time (pre-marketing → RED → BLACK), while P&I vs IO are two different things that exist simultaneously, not one superseding the other</button>
+</div>
+<div class="feedback">The distinction is temporal-succession (versions) vs. simultaneous-difference (variants) — conflating them would make "which one is current" a meaningless question for variants, since neither P&I nor IO ever supersedes the other.</div>
+</div>
+
+<h2>Recommended primary source</h2>
+<p>No single canonical external doc covers "document versioning with a current-version flag" as a named pattern — it's a common but ad hoc database design choice. If useful background, the general idea of a <a href="https://en.wikipedia.org/wiki/Slowly_changing_dimension" target="_blank" rel="noopener">"slowly changing dimension"</a> (a data-warehousing concept for tracking a record's history over time) is the closest formal relative, though this plan's design is much simpler than a full slowly-changing-dimension implementation.</p>
+
+<p class="ask-agent">If "partial unique index" (the rule enforcing exactly one current version per group) is unclear, ask your teaching agent for a walkthrough with a concrete example table.</p>
+
+<div class="phase-nav">
+<a href="0007-phase-6-5-admin-settings.html">← Phase 6.5 — Admin Settings</a>
+<a href="0009-phase-8-sources-logs-costs.html">Next: Phase 8 — Sources, Logs &amp; Costs →</a>
+</div>
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

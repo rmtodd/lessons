@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Phase 8 — Sources Actions + Logs/Costs Endpoints</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<p class="kicker">Lesson 9 of 10 · Dashboard Overhaul</p>
+<h1>Phase 8 — Sources Actions + Logs/Costs Endpoints</h1>
+<p><span class="status-future">Not started</span> — planned duration ~1 week.</p>
+
+<h2>The one-sentence version</h2>
+<p>Finish wiring up the remaining "Sources" screens (Presales, Freddie, EDGAR) with their real action buttons, extend the audit-log trigger to a few tables that were missed, add per-run scrape history and calendar snapshots so agency health is actually diagnosable, and finish the Costs dashboard's remaining backend pieces.</p>
+
+<h2>Why this phase exists</h2>
+<p>This phase is best understood as "closing several small, specific, previously-identified gaps," rather than one single new idea — it's a cleanup-and-completion phase. Three separate gaps, each worth understanding on its own:</p>
+
+<h3>Gap 1 — some tables still have no audit trail</h3>
+<p>Recall from Phase 2's recon: the presale index and Freddie index tables had no <a href="../reference/glossary.html#audit-log">audit log</a> trigger at all. Phase 4 built the actor-attribution machinery (the RPCs that carry "who did this" into the database), but the actual trigger that <em>writes</em> audit-log rows was never extended to fire on these two tables (plus <code>app_preferences</code> and the new <code>app_settings</code> table from Phase 6.5). The plan is precise about why this matters concretely: <strong>today, a human unlinking a presale match or dismissing one is captured in the override ledger (so the "what changed" story exists), but not in the audit log</strong> (so the older, simpler "raw before/after" trail is incomplete for those actions) — until this phase's trigger extension closes that gap. Once it does, the actor-attribution plumbing that's already flowing through the RPCs starts working on these tables automatically, with no further wiring needed.</p>
+
+<h3>Gap 2 — "why is this agency's scraper stuck?" has no good answer today</h3>
+<p>When a presale-scraping run has partial failures — some documents matched, some downloads failed with specific errors — that detail mostly vanishes once the run finishes; the "Agency health" cards in the old Sources screen approximate it client-side from whatever's currently in the database, rather than from an actual historical log of what happened on each run. This phase adds a real <code>scrape_runs</code> table capturing, per agency, per run: when it ran, how many rows matched, how many failed, and the specific errors — served through a new endpoint the health cards' "view log" dialog can call directly, replacing the old approximation with ground truth.</p>
+
+<h3>Gap 3 — Freddie's calendar page changes silently, with no record of what it used to say</h3>
+<p>Freddie Mac's issuance calendar is fetched from a PDF that changes over time as deals move through their process. Today, nothing records what that PDF looked like at any earlier point — so if an entry's listed date or status changes, there's no way to see what it said before. This phase adds a snapshot: when an entry's details actually change, the calendar PDF at that moment gets captured and stored, retrievable per entry later.</p>
+
+<h2>What ties these three together</h2>
+<p>Notice the shared shape: in each case, something was <em>working</em> (the scraper runs, the calendar gets polled, the presale index updates), but there was no durable record of <em>what happened along the way</em> when things went wrong or changed — only the current end state. This phase is fundamentally about <strong>observability</strong>: giving a human (or a future debugging session) enough historical detail to answer "what actually happened here, and when" without having to guess from the current snapshot alone.</p>
+<div class="analogy">
+<span class="label">Analogy</span>
+A car's dashboard telling you the engine is "fine" right now isn't as useful as a black box recorder that can tell you exactly what happened three minutes before the warning light came on. Phase 8 is mostly installing black boxes on parts of the system that previously only reported their current state.
+</div>
+
+<h2>Also finished here: the last pieces of the Costs screen</h2>
+<p>Phase 3 built the actual cost <em>logging</em> — every LLM call recording its true cost consistently. Phase 8 finishes the reporting side: a rollup database view (<code>v_llm_cost_daily</code>, pre-aggregating cost by day/operation/model/provider so the Costs screen doesn't have to scan every raw row every time it loads), plus the export and failed-jobs endpoints the Logs screen needs. This is a good moment to notice how far apart in the plan a feature's pieces can land — the Costs screen's foundation was Phase 3, and it isn't fully wired until Phase 8, five phases later.</p>
+
+<h2>Check your understanding</h2>
+<div class="quiz" data-correct="1">
+<div class="q">What's the common theme across the audit-trigger extension, scrape-run logging, and calendar snapshots in this phase?</div>
+<div class="options">
+<button class="opt">All three require the same new library to be installed</button>
+<button class="opt">Each closes a gap where the system only showed its *current* state, with no durable record of what happened along the way — the theme is observability/history, not new end-user features</button>
+<button class="opt">All three are required by a regulatory compliance deadline</button>
+</div>
+<div class="feedback">None of these three add a brand-new capability the pipeline didn't have before — they add the ability to *look back* at what happened, which is exactly what makes debugging a "why is this stuck" question possible instead of a guessing game.</div>
+</div>
+
+<h2>Recommended primary source</h2>
+<p>No single canonical doc covers this grab-bag of gap-closing work as one topic. If useful grounding for the general idea of "capture what happened, not just the current state," the Wikipedia overview of <a href="https://en.wikipedia.org/wiki/Observability_(software)" target="_blank" rel="noopener">observability in software systems</a> is a reasonable, accessible primer on why this category of work matters generally.</p>
+
+<p class="ask-agent">If you want to see exactly how a "partial failure, some rows matched, some failed" scrape run would actually look once <code>scrape_runs</code> exists, ask your teaching agent to sketch an example row.</p>
+
+<div class="phase-nav">
+<a href="0008-phase-7-versioning-documents.html">← Phase 7 — Versioning + Documents</a>
+<a href="0010-phase-9-parity-cutover.html">Next: Phase 9 — Parity + Cutover →</a>
+</div>
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

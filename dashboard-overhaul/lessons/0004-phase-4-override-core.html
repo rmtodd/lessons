@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Phase 4 — Override Core + Actor Plumbing</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<p class="kicker">Lesson 4 of 10 · Dashboard Overhaul · <strong>The centerpiece phase</strong></p>
+<h1>Phase 4 — Override Core + Actor Plumbing</h1>
+<p><span class="status-done">✅ DONE</span> — completed 2026-07-03, branch <code>dashboard-phase4</code>, 7 migrations live on the real production database.</p>
+
+<div class="callout warn">
+<span class="label">Why this lesson runs longer than the others</span>
+The plan itself calls this system "the centerpiece" (§5). Nearly every later phase either builds on top of it or depends on it existing. It's worth understanding this one deeply, even if it takes a while — the payoff is that Phases 5 through 9 all get noticeably easier to follow once this clicks.
+</div>
+
+<h2>The problem this phase solves</h2>
+<p>CMBSDOCS's whole pipeline is automated: LLMs read filings and extract facts (a deal's name, its type, its structure); scrapers find and match presale documents to deals; classifiers decide what kind of asset a filing describes. All of that is genuinely useful — but it's also sometimes <em>wrong</em>, and a human (Raymond or a colleague) needs to be able to correct it.</p>
+<p>Here's the trap: these automated processes don't stop running once a human corrects something. The same 15G filing might get <strong>re-extracted</strong> later (a bug fix, a schema update, a re-run). If the human's correction isn't protected, that re-run will silently steamroll right over it, and the correction is gone — with no record it ever existed, and no warning that it just got erased.</p>
+<div class="analogy">
+<span class="label">Analogy</span>
+Imagine a shared document where an automatic spell-checker runs every night and "fixes" everything back to whatever it originally guessed — including the one word you deliberately corrected by hand yesterday because the spell-checker was wrong about it. You'd stop trusting the document entirely, because you could never tell if your fix would survive till morning.
+</div>
+<p>Before this phase, exactly this kind of collision already existed in production: the plan documents that Slack's 15G "reclassify" feature (§3) directly overwrote the <code>deal_type</code> column with no protection at all, and a separate reprocessing endpoint could silently clobber human edits made through a completely different, older mechanism.</p>
+
+<h2>The design: a ledger, write-through, and a backstop trigger</h2>
+<p>The solution has three moving pieces, and it's worth learning each one by itself before seeing how they combine.</p>
+
+<h3>1. The ledger — one shared table for every override, ever</h3>
+<p>Instead of adding a special "_override" column to every table for every field that might someday need correcting (which the plan explicitly considered and rejected — it "doesn't scale to JSONB subfields... no unified history"), there's one single table, <code>field_overrides</code>, that records every override made anywhere in the system, as its own row:</p>
+<pre><code>entity_table    -- which table, e.g. 'deals'
+entity_pk       -- which row (stored as text, since IDs are
+                --   sometimes UUIDs and sometimes plain numbers)
+field_path      -- which field, e.g. 'deal_type' or a nested
+                --   JSONB path like 'extracted_attributes.deal.trust_name'
+action          -- 'override' | 'revert' | 'confirm' | 'dismiss'
+machine_value   -- what the machine had before the override
+override_value  -- the human's corrected value
+actor_label     -- who made this change
+created_at      -- when</code></pre>
+<p>Every override or revert creates a brand-new row rather than editing an old one — so the <em>entire history</em> of every correction, on every field, on every entity, ever made, lives permanently in one queryable place. This is what makes the plan's later "export the whole override history" feature (for improving future LLM prompts) possible with zero extra design work.</p>
+
+<h3>2. Write-through — so nobody else has to know the override system exists</h3>
+<p>Here's the subtlety: dozens of other places in the codebase read <code>deals.deal_type</code> directly — a matcher deciding eligibility, a Slack message, a list view. If overrides only lived in the ledger table, every single one of those readers would need to be rewritten to "check the ledger first, then fall back to the base column." That's fragile: miss updating even <em>one</em> reader, and it silently uses the wrong (stale, machine) value forever.</p>
+<p>Instead, the moment an override is applied, the correct value is written to <strong>both places at once, in the same database transaction</strong> (see <a href="../reference/glossary.html#atomic">atomic</a> in the glossary): a new ledger row records the history, <em>and</em> the actual base column gets updated to the human's value. Every existing reader keeps working exactly as before — they're reading the base column, which is now simply correct.</p>
+
+<h3>3. The reassert trigger — the backstop for when write-through isn't enough</h3>
+<p>Write-through fixes the override <em>moment</em>. It doesn't stop a machine process from writing over that field again <em>later</em>. For that, a database <a href="../reference/glossary.html#trigger">trigger</a> — code that runs automatically, inside the database itself, every time a row is about to be updated — checks: does this field have an active override? If yes, and this isn't a legitimate override-write itself, put the human's value back <em>before the update is even saved</em>, and quietly record what the machine just tried to write as <code>latest_machine_value</code> (so you can still see "the model currently disagrees with the human, here's what it thinks now" without losing the protection).</p>
+<div class="callout win">
+<span class="label">Why the trigger is not optional</span>
+One specific system — an external tool the team calls the "sec-chunker" — writes to the <code>sec_filings</code> table and is completely outside CMBSDOCS's own codebase. There's no way to add a Python-side check to code the team doesn't own. The reassert trigger is the <em>only</em> layer that can protect overrides there, which is exactly why the plan calls it "mandatory," not a nice-to-have.
+</div>
+
+<h2>Two layers, on purpose</h2>
+<p>Put together, there are two independent lines of defense, and this redundancy is deliberate:</p>
+<table>
+<tr><th>Layer</th><th>Where it runs</th><th>Catches</th></tr>
+<tr><td><strong>Layer 1 — the Python <a href="../reference/glossary.html#guard">guard</a></strong></td><td>Inside CMBSDOCS's own code, right before a machine writer saves anything</td><td>The normal case: an extractor or matcher about to overwrite a field, checked and skipped before it even tries</td></tr>
+<tr><td><strong>Layer 2 — the reassert trigger</strong></td><td>Inside Postgres itself, on every update to a protected table</td><td>Anything Layer 1 missed or couldn't reach — especially the external sec-chunker system that CMBSDOCS's own guard code can never see</td></tr>
+</table>
+<p>This "defense in depth" idea — don't rely on a single point of protection for something this important — is a pattern worth recognizing; it recurs throughout well-built systems generally, not just here.</p>
+
+<h2>Actor attribution — "who did this," attached permanently</h2>
+<p>This phase also solved a second, related problem: <strong>nobody could tell who made a given change.</strong> A reclassification might have happened via the dashboard, via Slack, or by an automated worker — and before this phase, none of that was recorded consistently.</p>
+<p>The fix is three small Postgres functions called <a href="../reference/glossary.html#rpc">RPCs</a> (<code>app_apply_override</code>, <code>app_revert_override</code>, <code>app_apply_update</code>) that every human-triggered change now flows through. Each one carries the acting person's identity into the database for that one operation (via what the plan calls "GUCs" — temporary, per-request settings the database can read during that single transaction), so the <a href="../reference/glossary.html#audit-log">audit log</a> trigger can stamp every change with a real actor, instead of leaving it blank. Worker-run automated changes correctly show <code>NULL</code> (no human actor) — the absence of a person is itself meaningful information.</p>
+<p>A concrete, valuable side effect: <strong>Slack's existing "reclassify" and "confirm" buttons were refactored to go through this exact same service</strong> as the dashboard. Before, Slack's reclassify was destructive and unattributed; now, whether a correction comes from Slack or the new dashboard, it lands in the same ledger, with the same protection, with the acting person's name attached.</p>
+
+<h2>Review states ride the same ledger — no second system needed</h2>
+<p>Recall from Phase 1: Raymond asked for a "review tracker" — every machine match or classification should carry a state (unreviewed / confirmed / corrected / dismissed). Rather than building a whole separate table for this, the team recognized that <strong>confirm</strong> and <strong>dismiss</strong> are just two more kinds of ledger rows:</p>
+<ul>
+<li><strong>Confirm</strong> = a ledger row where the human's value is identical to the machine's value — meaning "I looked at this and it's right," which is still fully protected by the reassert trigger from a later machine re-run silently un-confirming it.</li>
+<li><strong>Dismiss</strong> = a ledger row marking the whole record as irrelevant (e.g. "this filing isn't actually a CMBS deal"), always with a required explanation.</li>
+</ul>
+<p>This is an example of good design economy: instead of a bespoke, parallel "review status" system, the same append-only ledger already built for overrides absorbs this need almost for free.</p>
+
+<h2>The field registry — how new fields plug in without redesigning anything</h2>
+<p>One more piece shipped in this phase: a single Python file (<code>fields/registry.py</code>) that lists, for every overridable field across the whole system, its type, its display group, and whether it's overridable at all. This "field registry" is served to the dashboard over the API (<code>GET /meta/field-registry</code>), so the frontend can render the right kind of input (text box, dropdown, money field) for any field automatically — and, critically, <strong>the generic <code>POST /overrides</code> endpoint rejects any attempt to override a field that isn't in this registry</strong>. This means the registry isn't just documentation for the UI — it's the actual security gate controlling what's allowed to be overridden at all.</p>
+<div class="callout win">
+<span class="label">Why this matters for the plan's "extensible without redesign" goal (§1, goal 4)</span>
+Because of the registry, adding a brand-new overridable field later — say, a new attribute the eval-schema extraction starts producing — is <em>one line</em> in this registry file, not a new UI screen and not a new endpoint. This is precisely the extensibility the plan's original goals called for.
+</div>
+
+<h2>A subtlety worth knowing about (it resurfaces in Phase 7)</h2>
+<p>The write-through and reassert logic for nested JSONB fields (like <code>extracted_attributes.deal.trust_name</code>) is what the plan calls "best-effort": if the surrounding object (<code>deal</code>) doesn't already exist in the blob, the override on the nested field silently does nothing useful — it looks like it worked, but it didn't actually change anything a reader would see. Today this doesn't bite, because every currently-registered overridable field is a plain top-level column. It becomes a real concern in Phase 7, once nested annex fields start getting registered — flagged honestly in the plan rather than "fixed" prematurely for a case that doesn't exist yet.</p>
+
+<h2>Check your understanding</h2>
+<div class="quiz" data-correct="1">
+<div class="q">Why does the system need *both* the Python guard and the database reassert trigger, instead of just one or the other?</div>
+<div class="options">
+<button class="opt">The trigger is faster, so the guard is only used as a backup when the trigger is too slow</button>
+<button class="opt">The Python guard can only protect code CMBSDOCS itself controls; the external sec-chunker system writes directly to the database and can never be reached by a Python-side check, so only a database-level trigger can protect it</button>
+<button class="opt">Postgres requires at least two independent checks on every table by default</button>
+</div>
+<div class="feedback">This is the crux of "defense in depth" here: the guard is the cheap, preferred check for code the team controls, but it's fundamentally powerless against an external system. The trigger is the only layer that can see *every* write, regardless of where it came from.</div>
+</div>
+
+<div class="quiz" data-correct="0">
+<div class="q">Why is "confirm" treated as a ledger row rather than just leaving a field alone once a human has checked it?</div>
+<div class="options">
+<button class="opt">Because leaving it alone gives no protection — if it's just "untouched," a later machine re-run could still silently change it with nobody noticing; a confirm ledger row makes the reassert trigger protect the confirmed value just like an override</button>
+<button class="opt">Because the dashboard's UI framework requires every field to have a database row</button>
+<button class="opt">Because confirm and override use completely different database tables under the hood</button>
+</div>
+<div class="feedback">The whole point of putting confirm on the same ledger as override is that it gets the same protection for free — a human's endorsement is treated with exactly the same seriousness as a human's correction.</div>
+</div>
+
+<h2>Recommended primary source</h2>
+<p><a href="https://www.postgresql.org/docs/current/triggers.html" target="_blank" rel="noopener">PostgreSQL Docs — Triggers</a>. The "reassert" mechanism is a fairly standard BEFORE UPDATE trigger, and seeing the general concept explained by Postgres itself will make the specific one here feel much less like magic.</p>
+
+<p class="ask-agent">This is the densest lesson in the set — if any single piece (the ledger schema, write-through, the two-layer guard, or the field registry) needs a second pass, ask your teaching agent to re-explain just that one piece with a different example.</p>
+
+<div class="phase-nav">
+<a href="0003-phase-3-llm-cost-logging.html">← Phase 3 — LLM Cost Logging</a>
+<a href="0005-phase-5-auth-rls.html">Next: Phase 5 — Auth + RLS Groundwork →</a>
+</div>
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

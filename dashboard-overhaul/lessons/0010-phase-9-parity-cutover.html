@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Phase 9 — Parity + Cutover</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<p class="kicker">Lesson 10 of 10 · Dashboard Overhaul · Final phase</p>
+<h1>Phase 9 — Parity + Cutover</h1>
+<p><span class="status-future">Not started</span> — planned duration ~2–3 days, followed by 48 hours of observation. This is the last phase — after it, the new dashboard <em>is</em> the dashboard, and the old one is gone.</p>
+
+<h2>The one-sentence version</h2>
+<p>Confirm the new dashboard can do everything the old one could, flip on real security for good, permanently retire the old dashboard, and clean up every piece of the migration's temporary scaffolding — then watch closely for two days before calling it done.</p>
+
+<h2>Why a dedicated "cutover" phase, instead of just... switching?</h2>
+<p>Every earlier phase in this plan was built to run <strong>alongside</strong> the old dashboard without disturbing it — reads use the same proven anon-key pattern; RLS was rolled out with temporary anon policies specifically so the old dashboard wouldn't notice anything changed; auth had a <code>REQUIRE_AUTH=false</code> escape hatch. That caution was deliberate, and it means the moment of actually retiring the old system is its own distinct, risk-bearing event — not something that happens automatically as a side effect of earlier phases. Phase 9 exists to make that moment small, checked, and reversible-feeling, rather than a single irreversible leap.</p>
+<div class="analogy">
+<span class="label">Analogy</span>
+Moving into a newly renovated house while still keeping the old apartment's lease active, utilities running, and a spare key — right up until the day you've actually walked every room of the new place, confirmed the plumbing works, and only then hand back the old apartment's keys for good. Phase 9 is the "hand back the keys" day, not the renovation itself.
+</div>
+
+<h2>What "parity" actually means, concretely</h2>
+<p>Before switching anyone over, the plan calls for an explicit <strong>parity checklist</strong> — walking through everything the old, 7,029-line dashboard could do, and confirming the new one covers it (or that its absence was a deliberate, already-approved decision, like dropping the dead T1/T2/T3 columns back in Phase 1). This matters because a rebuild that's 95% feature-complete but silently missing one thing someone relies on daily doesn't feel like progress to that person — it feels like a regression, even though the other 95% is strictly better.</p>
+
+<h2>The security flip, now for real</h2>
+<p>Recall the safety valve from Phase 5: <code>REQUIRE_AUTH</code> defaulted to <code>false</code>, so the backend kept accepting its old, looser trust-a-header behavior while the rest of the system caught up. Phase 9 is where that finally flips to <code>true</code> — from this point on, every mutating request genuinely must carry a real, verified login token; there's no more fallback. This is only safe to do now because parity has been confirmed and the old dashboard (the one thing that never had real login) is being retired in the very same phase.</p>
+
+<h2>Cleaning up the migration's own scaffolding</h2>
+<p>A less obvious but important part of this phase: several things were deliberately kept around <em>during</em> the transition purely to avoid breaking the old dashboard, and now that it's gone, they can finally be removed:</p>
+<table>
+<tr><th>What gets removed</th><th>Why it existed at all, and why it's safe to remove now</th></tr>
+<tr><td>The temporary <code>anon</code> RLS policies (Phase 5)</td><td>They existed only to keep the old dashboard's anon-key reads working during the transition. With the old dashboard gone, nothing uses the anon key for these tables anymore.</td></tr>
+<tr><td>The old 15G "<code>*_override</code>" columns (<code>deal_name_override</code>, <code>deal_type_override</code>, etc.)</td><td>These were the <em>original</em>, pre-Phase-4 way humans corrected 15G data — kept alive only because the old dashboard still read and wrote them directly. Phase 4 already copied their real historical values into the new ledger and wrote the effective values through to the base columns, so by this point they're pure dead weight, safe to drop.</td></tr>
+<tr><td><code>presale_deal_override_log</code> (the old, single-purpose presale override table)</td><td>Its data was backfilled into the unified ledger back in Phase 4 (marked <code>source='backfill'</code>). Frozen (stopped being written to) once Phase 4 landed; now dropped entirely.</td></tr>
+<tr><td><code>app_preferences</code> table</td><td>Its two remaining keys migrate into the new <code>app_settings</code> table from Phase 6.5, then the old table is dropped — one settings system, not two.</td></tr>
+</table>
+<div class="callout win">
+<span class="label">The pattern worth remembering</span>
+Notice how many of these cleanups were <em>already planned</em> back when the thing being replaced was first built (Phase 4 explicitly says "keep columns until old dashboard retires, then drop"). Good migrations don't just build the new thing — they leave themselves a clear, already-agreed-upon todo list for removing the old thing's remnants, instead of leaving "temporary" scaffolding in place indefinitely, which is how codebases quietly accumulate permanent-feeling temporary cruft.
+</div>
+
+<h2>Why 48 hours of watching, after everything already passed its checks</h2>
+<p>Even after parity is confirmed and every automated check passes, the plan calls for 48 hours of just <em>observing</em> the running system (workers, Slack integration) before considering the cutover truly finished. This acknowledges something automated tests can't fully cover: some problems only show up under real, live, slightly-unpredictable production traffic over time — a batch job that only runs once a day, a rare filing type, an edge case in a scraper's retry logic that only surfaces after enough real-world attempts. This is a healthy, humble habit: "the tests passed" and "this is safe in production" are related but not identical claims, and the gap between them is exactly what a short observation window is for.</p>
+
+<h2>Looking back at the whole plan from here</h2>
+<p>Standing at Phase 9, it's worth noticing the shape of the whole journey these ten lessons covered:</p>
+<ul>
+<li><strong>Phases 1–2</strong> were about not building on wrong assumptions — first about the UI (validated with real review, cheaply, before real backend risk), then about the database itself (recon before any migration).</li>
+<li><strong>Phases 3–4</strong> built the two foundational systems everything else depends on: honest cost accounting, and the override/actor system that protects every human correction from every later phase forward.</li>
+<li><strong>Phase 5</strong> added real security, carefully, without an outage.</li>
+<li><strong>Phases 6–8</strong> connected the already-safe pieces together into a fully working product, closing small gaps as they became visible.</li>
+<li><strong>Phase 9</strong> confirmed nothing was missed, flipped on full security, and — importantly — cleaned up every piece of temporary scaffolding the transition itself required.</li>
+</ul>
+<p>That's a genuinely disciplined shape for a large rebuild: validate cheaply and early, build the hard safety-critical foundations before the features that depend on them, and treat "removing the old system's remnants" as real, planned work — not an afterthought.</p>
+
+<h2>Check your understanding</h2>
+<div class="quiz" data-correct="0">
+<div class="q">Why does the plan schedule 48 hours of observation *after* the parity checklist and automated tests already pass?</div>
+<div class="options">
+<button class="opt">Because passing automated tests confirms the code behaves as designed under the conditions it was tested for — it can't guarantee there's no rare, real-world edge case (an unusual filing, a once-daily job, a rare retry path) that only shows up under live, unpredictable production traffic over time</button>
+<button class="opt">Because Railway requires a mandatory 48-hour cooldown after any deploy</button>
+<button class="opt">Because the parity checklist is only 50% reliable</button>
+</div>
+<div class="feedback">This is the general, important gap between "verified under test conditions" and "verified safe in the messy real world" — a short observation window after a big change is a cheap, humble way to catch the difference before fully committing.</div>
+</div>
+
+<h2>Recommended primary source</h2>
+<p>No single external doc covers "cutover phase design" as one topic — this is standard, well-established software-migration practice assembled from experience. If useful outside grounding, Martin Fowler's writing on <a href="https://martinfowler.com/bliki/StranglerFigApplication.html" target="_blank" rel="noopener">the "Strangler Fig" migration pattern</a> describes the broader strategy this whole plan follows: build the new system alongside the old one, route more and more real work to it gradually, and only remove the old system once nothing depends on it anymore.</p>
+
+<p class="ask-agent">This was the last of the ten planned lessons — if you'd like a lesson that pulls the recurring threads (the override ledger, actor attribution, the registry pattern) across all nine-plus phases into one single review, ask your teaching agent to build that as an eleventh, cross-cutting lesson.</p>
+
+<div class="phase-nav">
+<a href="0009-phase-8-sources-logs-costs.html">← Phase 8 — Sources, Logs &amp; Costs</a>
+<a href="../reference/glossary.html">Glossary reference →</a>
+</div>
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

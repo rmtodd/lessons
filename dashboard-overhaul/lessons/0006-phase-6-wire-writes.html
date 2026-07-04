@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Phase 6 — Wire Writes</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<p class="kicker">Lesson 6 of 10 · Dashboard Overhaul</p>
+<h1>Phase 6 — Wire Writes</h1>
+<p><span class="status-future">Not started</span> — planned duration ~1 week, comes after Phase 5.</p>
+
+<h2>The one-sentence version</h2>
+<p>Go back to every "not wired yet" stub button built in Phase 1's clickable prototype, and replace each toast message with a real call to the real endpoint — most of which were already built back in Phase 4, sitting unused until now.</p>
+
+<h2>Why this phase exists, and why it's straightforward now</h2>
+<p>This is the payoff of the whole "UI-first" strategy from Phase 1. Back then, the team deliberately built every screen with fake writes so the <em>layout</em> could be reviewed cheaply. Now that the layout is locked in (Phase 1), the database structure and protection rules exist (Phase 4), and login/security are in place (Phase 5), this phase is comparatively low-risk: connect button to endpoint, surface-by-surface, removing one stub toast at a time.</p>
+<div class="analogy">
+<span class="label">Analogy</span>
+Back to the cardboard-kitchen analogy from Phase 1: this is the phase where the real plumbing finally gets run behind the walls that were already approved. Because nobody's still arguing about where the fridge goes, the plumber can just plumb.
+</div>
+<p>The plan is explicit that most of the actual REST endpoints already exist from Phase 4 — <code>/overrides</code>, <code>/overrides/{id}/revert</code>, <code>/deals/{id}/rename</code>, <code>/edgar/15g/{id}/reclassify</code>, <code>/presale-index/{id}/review</code>, and more. This phase is largely about the <em>frontend</em> side: swapping each stub's fake toast for a real network call, and handling what happens when that call succeeds or fails on screen (see <a href="../reference/glossary.html#optimistic-update">optimistic update</a> in the glossary).</p>
+
+<h2>What's genuinely new here (not just wiring)</h2>
+<p>A few things in this phase are actual new work, not just connecting existing plumbing:</p>
+<ul>
+<li><strong><code>GET /triage</code>, <code>GET /me</code>, and <code>GET /meta/field-registry</code> go live</strong> — the endpoints Triage and the override UI need to function for real, now enriched with the reviewed/total counts the Phase-1 "Review queue" strip needs.</li>
+<li><strong>Force re-check</strong> gets its actual migration and endpoint (see Phase 12 in the plan, §12, for the detailed mechanics) — this is the feature that lets a human bypass the scraper's normal stopping rules (like "we already found 3 agencies' worth of coverage, stop looking") for one deal, one time.</li>
+<li><strong>A new small feature: deal notes.</strong> A plain freeform annotation a human can attach to a deal — new table, two simple endpoints. Small, but a good example of "not everything needs the override system" — notes aren't correcting a machine value, so they don't need a ledger entry, just a normal table.</li>
+<li><strong><code>/presale-index/{id}/retry-download</code></strong> — resets the download-attempt counter for presales that either failed or simply expired, so they can be retried instead of sitting stuck forever.</li>
+</ul>
+
+<h2>Two follow-up corrections that surfaced only once the pieces were connected</h2>
+<p>This is a useful, honest pattern to notice: some problems only become visible once you actually wire two previously-separate pieces together, even though each piece worked fine in isolation.</p>
+<ul>
+<li><strong>Excluded/dismissed rows were leaking into lists.</strong> Phase 4 added <code>excluded</code> and <code>dismissed</code> flags so a human could mark a deal or filing as irrelevant. But the actual list screens (Deals, 15G Review, Presales) and the <code>/triage</code> endpoint weren't yet filtering those rows out — so something a human explicitly marked "not relevant" would still show up everywhere. This phase fixes that filtering, surface by surface.</li>
+<li><strong>The reclassify/exclude cascade isn't atomic yet.</strong> Recall from Phase 4's glossary entry on <a href="../reference/glossary.html#cascade">cascades</a>: reclassifying a deal's type has knock-on effects (updating monitoring flags, reconciling monitoring tasks). Today those happen as several separate database calls in a row, not one atomic unit — so a crash mid-sequence could leave a deal in an inconsistent state (reclassified, but monitoring flags not yet updated to match). This phase's plan calls for a proper all-or-nothing <a href="../reference/glossary.html#rpc">RPC</a> that does the whole cascade as one transaction, closing that gap.</li>
+</ul>
+<div class="callout warn">
+<span class="label">Why this is worth noticing, not just fixing</span>
+Neither of these was a mistake in Phase 4 — they were reasonable to defer, because they only become <em>observable</em> problems once the real UI and real cascade logic are exercised together. This is a normal, healthy part of phased work: each phase surfaces a small number of "oh, now that we can see it end-to-end, here's a gap" items for the next phase to absorb.
+</div>
+
+<h2>The registry's second job, reinforced here</h2>
+<p>One rule from Phase 4 gets repeated explicitly in this phase's notes, because it matters every time a new field gets added from here on: <strong>any newly overridable field needs one line added to the field registry.</strong> The registry isn't just UI decoration — the generic <code>/overrides</code> endpoint actively rejects any attempt to write a field that isn't registered. So this phase's "wire everything up" work has a hard dependency on the registry already existing and being complete.</p>
+
+<h2>Check your understanding</h2>
+<div class="quiz" data-correct="1">
+<div class="q">Why is Phase 6 considered comparatively low-risk compared to Phase 4?</div>
+<div class="options">
+<button class="opt">Because Phase 6 doesn't touch the database at all</button>
+<button class="opt">Because the hard problems — data protection (the override ledger), security (RLS), and identity (auth) — were already solved in earlier phases; this phase is mostly connecting an already-approved UI to already-built, already-protected endpoints</button>
+<button class="opt">Because Phase 6 is done entirely by an automated script with no code review</button>
+</div>
+<div class="feedback">Phase 6 does touch the database (new tables for deal notes, filtering fixes) — the "low risk" framing is about not having to solve new hard problems, just connect already-solved pieces together.</div>
+</div>
+
+<h2>Recommended primary source</h2>
+<p><a href="https://tanstack.com/query/latest/docs/framework/react/guides/optimistic-updates" target="_blank" rel="noopener">TanStack Query — Optimistic Updates guide</a>. This is the exact mechanism the frontend will use when swapping each stub for a real write — the screen updates instantly, then quietly rolls back if the real request fails.</p>
+
+<p class="ask-agent">If "cascade" or "atomic RPC" from Phase 4 didn't fully stick, this is a good moment to ask your teaching agent to revisit it — Phase 6 is where that concept gets a concrete, hands-on example (the reclassify cascade).</p>
+
+<div class="phase-nav">
+<a href="0005-phase-5-auth-rls.html">← Phase 5 — Auth + RLS Groundwork</a>
+<a href="0007-phase-6-5-admin-settings.html">Next: Phase 6.5 — Admin Settings →</a>
+</div>
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Glossary — Dashboard Overhaul</title>
+<link rel="stylesheet" href="../assets/style.css">
+<style>
+  body { max-width: 860px; }
+  dt { font-weight: 700; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin-top: 1.3rem; color: var(--accent); }
+  dd { margin-left: 0; margin-bottom: 0.3rem; }
+  .avoid { color: var(--muted); font-size: 0.85em; }
+  @media print { body { font-size: 13px; } h2 { break-before: page; } }
+</style>
+</head>
+<body>
+<p class="kicker">Reference · print-friendly</p>
+<h1>Glossary — CMBSDOCS Dashboard Overhaul</h1>
+<p>Every term used across the phase lessons, defined once here. When a lesson uses one of these words, it links back to this page instead of re-explaining it. Terms are grouped by the concept cluster they belong to, not alphabetically, so related ideas sit together.</p>
+
+<h2 id="databases">Databases &amp; Postgres</h2>
+<dl>
+<dt id="database">Database</dt>
+<dd>A structured place to permanently store information as <em>rows</em> in <em>tables</em> — think a very large, very strict spreadsheet that many programs can read and write to at once. CMBSDOCS uses <a href="#supabase">Supabase</a>, which runs <a href="#postgres">Postgres</a> underneath.</dd>
+
+<dt id="postgres">Postgres (PostgreSQL)</dt>
+<dd>The specific database engine CMBSDOCS's data lives in. When the plan says "a migration on Postgres" or "a Postgres trigger," it means: a change to the rules of this database.</dd>
+
+<dt id="table-column-row">Table / Column / Row</dt>
+<dd>A <em>table</em> is one spreadsheet-like grid (e.g. <code>deals</code>, <code>edgar_15g_filings</code>). A <em>column</em> is one named field every row has (e.g. <code>deal_name</code>). A <em>row</em> is one record — one specific deal, one specific filing.</dd>
+
+<dt id="migration">Migration</dt>
+<dd>A saved, versioned file containing the exact instructions to change the database's structure (add a table, add a column, add a rule) — never a live, undo-able edit made by hand. Every migration is a permanent, ordered step in the database's history, like a numbered patch note. This exists so the exact same change can be replayed on a test copy of the database before it's ever run on the real one, and so there's a paper trail of every structural change ever made.
+<div class="analogy"><span class="label">Analogy</span>Renovating a building by filing a permitted blueprint for every wall you move, in order, rather than just knocking walls down and hoping you remember what you did.</div>
+<span class="avoid">Primary source: <a href="https://supabase.com/docs/guides/deployment/database-migrations" target="_blank" rel="noopener">Supabase Docs — Database Migrations</a></span></dd>
+
+<dt id="jsonb">JSONB / JSON blob</dt>
+<dd>Instead of every piece of data getting its own column, some columns hold a whole nested bundle of data as one flexible unit (JSONB). It's useful when the shape of the data varies row to row or changes over time (e.g. an LLM's extracted attributes, which grow new fields as the extraction schema evolves) — but it's harder for the database to protect or query than a plain column. The plan calls one nested location inside a JSONB blob a <strong>field path</strong> (e.g. <code>extracted_attributes.deal.trust_name</code>).
+<span class="avoid">Primary source: <a href="https://www.postgresql.org/docs/current/datatype-json.html" target="_blank" rel="noopener">PostgreSQL Docs — JSON Types</a></span></dd>
+
+<dt id="trigger">Trigger</dt>
+<dd>A rule attached directly to a database table that automatically runs a small program every time a row is inserted, updated, or deleted — no matter which outside program made the change. Triggers are the database's own immune system: they fire even if the code that changed the data forgot to follow the rules, or wasn't written to know about them. CMBSDOCS uses two: one that snapshots every change into the <a href="#audit-log">audit log</a>, and one (the <strong>reassert trigger</strong>) that puts a human's <a href="#override">override</a> value back if a machine process tries to overwrite it.
+<span class="avoid">Primary source: <a href="https://www.postgresql.org/docs/current/triggers.html" target="_blank" rel="noopener">PostgreSQL Docs — Triggers</a></span></dd>
+
+<dt id="rpc">RPC (Remote Procedure Call)</dt>
+<dd>A named, pre-written bundle of database steps that a program can call as a single unit — e.g. <code>app_apply_override(...)</code>. It exists because some actions need several things to happen together, atomically (see <a href="#atomic">atomic</a>), and a single plain read/write can't guarantee that. RPCs in this plan also carry the "who did this" information (see <a href="#actor">actor</a>) into the database for that one call.</dd>
+
+<dt id="atomic">Atomic (as in "atomic write")</dt>
+<dd>A set of database changes that either <em>all</em> happen or <em>none</em> happen — there's no in-between state where only half of it landed. This matters when one user action (like "reclassify this deal") needs to update several tables together; without atomicity, a crash mid-update could leave the data in a broken, inconsistent state.</dd>
+
+<dt id="rls">RLS (Row Level Security)</dt>
+<dd>A Postgres feature that lets the database itself decide, row by row, who is allowed to read or write it — instead of trusting every program that connects to behave. Today almost every CMBSDOCS table has RLS <em>off</em>, meaning anyone with the read-only "anon" key can see everything. Phase 5 turns RLS <em>on</em> for the tables the new dashboard reads directly.
+<span class="avoid">Primary source: <a href="https://supabase.com/docs/guides/database/postgres/row-level-security" target="_blank" rel="noopener">Supabase Docs — Row Level Security</a></span></dd>
+
+<dt id="anon-authenticated">anon / authenticated (roles)</dt>
+<dd>Two standing "badges" Supabase issues to anything that connects. <code>anon</code> is the badge given to any caller holding the public read-only key (today: the old dashboard, and anyone who has that key). <code>authenticated</code> is the badge given to someone who has actually logged in. RLS policies are written per badge — "authenticated users can read this table, anon cannot."</dd>
+</dl>
+
+<h2 id="backend">Backend, APIs &amp; Auth</h2>
+<dl>
+<dt id="api-endpoint">API / Endpoint</dt>
+<dd>The dashboard's server (FastAPI, written in Python) exposes named "doors" that the browser can knock on to ask for data or request a change — e.g. <code>POST /overrides</code>, <code>GET /triage</code>. Each door (<strong>endpoint</strong>) has a fixed contract: what you're allowed to send it, and what it sends back. The whole set of doors is the <strong>API</strong>.
+<span class="avoid">Primary source: <a href="https://developer.mozilla.org/en-US/docs/Web/HTTP/Overview" target="_blank" rel="noopener">MDN — HTTP Overview</a></span></dd>
+
+<dt id="get-post">GET vs POST</dt>
+<dd>Two of the "verbs" a request to an endpoint can use. <code>GET</code> means "just show me something," and is assumed safe to repeat with no side effects. <code>POST</code> means "do something" (create, change, delete) and is not safe to blindly repeat.</dd>
+
+<dt id="router-service">Router / Service (layers)</dt>
+<dd>CMBSDOCS's backend code is organized in layers: a <strong>router</strong> file just defines "this URL exists, here's roughly what it does," and hands the real work to a <strong>service</strong> function, which is where the actual logic lives (talk to the database, apply business rules). This separation means the same logic (e.g. reclassifying a 15G filing) can be triggered from two different front doors — the dashboard <em>and</em> Slack — by both routers calling the same one service function, instead of two copies of the logic drifting apart.</dd>
+
+<dt id="jwt">JWT (JSON Web Token) / Auth</dt>
+<dd>A signed, tamper-proof digital "ID card" issued when someone logs in, attached to every subsequent request so the server can verify who's asking without re-checking a password every time. <strong>Auth</strong> (authentication) is the umbrella term for "proving who you are"; <strong>authorization</strong> is the separate question of "what are you allowed to do now that we know who you are" (that's what <a href="#rls">RLS</a> and the "must be logged in" endpoint guards handle).
+<span class="avoid">Primary source: <a href="https://supabase.com/docs/guides/auth/jwts" target="_blank" rel="noopener">Supabase Docs — JWTs</a></span></dd>
+
+<dt id="actor">Actor / Actor attribution</dt>
+<dd>Recording exactly <em>who</em> (which human, or "the system" for an automated process) made a given change, attached to that change permanently. Before this plan, most database changes had no such record — you could see <em>that</em> a deal was reclassified, but not <em>who</em> reclassified it or through which surface (dashboard vs. Slack).</dd>
+
+<dt id="cors">CORS</dt>
+<dd>A browser-enforced safety rule that blocks a webpage from one address from freely calling an API hosted at a different address, unless that API explicitly allows it. Adding the new dashboard's web address to the backend's CORS allow-list is a small, easy-to-forget step whenever a new frontend is stood up.</dd>
+</dl>
+
+<h2 id="frontend">Frontend (the part you click on)</h2>
+<dl>
+<dt id="spa">SPA (Single-Page Application)</dt>
+<dd>A website that loads once, then swaps its content in and out in the browser using JavaScript, instead of asking the server for a whole new page on every click. The new dashboard is an SPA, built with <a href="#react">React</a>.</dd>
+
+<dt id="react">React</dt>
+<dd>The JavaScript library used to build the dashboard's screens out of reusable, composable pieces called <em>components</em> (a table row, a filter dropdown, a whole page).</dd>
+
+<dt id="tanstack">TanStack (Router / Query / Table / Virtual)</dt>
+<dd>A family of four add-on tools the dashboard uses on top of React, each solving one specific, recurring problem:
+  <ul>
+    <li><strong>Router</strong> — turns every filter/search choice into part of the page's URL, so a filtered view can be bookmarked or shared as a link.</li>
+    <li><strong>Query</strong> — manages "ask the server for data, cache it, and update the screen instantly (optimistically) before the server even confirms the change."</li>
+    <li><strong>Table</strong> — the engine behind sortable, filterable data grids.</li>
+    <li><strong>Virtual</strong> — renders only the rows currently visible on screen for very long lists (e.g. thousands of log rows), so the browser doesn't have to draw all of them at once.</li>
+  </ul>
+<span class="avoid">Primary source: <a href="https://tanstack.com/query/latest/docs/framework/react/overview" target="_blank" rel="noopener">TanStack Query docs</a>, <a href="https://tanstack.com/router/latest/docs/framework/react/overview" target="_blank" rel="noopener">TanStack Router docs</a></span></dd>
+
+<dt id="optimistic-update">Optimistic update</dt>
+<dd>When you click an action (e.g. rename a deal), the screen updates <em>immediately</em> as if it already worked, while the real request is still in flight to the server. If the server later says "no, that failed," the screen quietly rolls back. This makes the app feel instant instead of laggy.</dd>
+
+<dt id="stub">Stubbed (write)</dt>
+<dd>A button or form that looks fully real and clickable, but instead of actually changing anything, just shows a small "not wired yet" message. Used deliberately in Phase 1 so the whole app's layout could be reviewed and approved before any real backend logic was built underneath it.</dd>
+</dl>
+
+<h2 id="overrides">The Override System (the plan's centerpiece)</h2>
+<dl>
+<dt id="override">Override</dt>
+<dd>A human's correction to a piece of data that a machine (an LLM extraction, a scraper, an automated matcher) originally produced. The core design rule of this whole plan: <strong>a human override must never be silently erased</strong> by the machine running again later.</dd>
+
+<dt id="ledger">Ledger (the <code>field_overrides</code> table)</dt>
+<dd>One single table that records every override, ever made, on any field, on any table, as its own permanent row — instead of adding a separate "_override" column to every table for every field that might need one. It records the old (machine) value, the new (human) value, who made the change, and when. See the Phase 4 lesson for the full design.</dd>
+
+<dt id="write-through">Write-through</dt>
+<dd>When a human overrides a value, the change is applied in two places <em>at the same time, in the same database transaction</em>: (1) a new row is added to the <a href="#ledger">ledger</a> as the permanent history, and (2) the actual base column (e.g. <code>deals.deal_name</code>) is updated to the new value. Write-through exists so that every other piece of code that reads <code>deals.deal_name</code> directly — a matcher, a Slack message, a list view — sees the corrected value automatically, without needing to know the override system exists.</dd>
+
+<dt id="reassert">Reassert (trigger)</dt>
+<dd>The safety net for write-through: if some machine process updates a field that has an active override anyway (either because its code wasn't updated to skip overridden fields, or it's an external system CMBSDOCS doesn't control), a database trigger catches the incoming change <em>before it's saved</em> and puts the human's overridden value back in its place — while quietly recording what the machine <em>tried</em> to write as <code>latest_machine_value</code>, so you can still see "the model now disagrees with the human, here's what it currently thinks."</dd>
+
+<dt id="guard">Guard (the Python-side guard)</dt>
+<dd>The first, preferred line of defense: before a machine writer (an extractor, a matcher) saves its results, a shared helper checks which fields already have an active override and skips writing those specific fields. The <a href="#reassert">reassert trigger</a> is the backstop for when this guard is missing or bypassed — notably, one upstream system (an external "sec-chunker") can't be given this Python guard at all, which is exactly why the database-level trigger backstop is <em>mandatory</em>, not just a nice-to-have.</dd>
+
+<dt id="cascade">Cascade</dt>
+<dd>When overriding one field has to trigger consistent follow-on changes elsewhere — e.g. reclassifying a deal's type has to also update its monitoring flags and reconcile its monitoring tasks, or the deal ends up in an inconsistent state (e.g. still being watched under the wrong asset-class rules).</dd>
+
+<dt id="provenance">Provenance (chip)</dt>
+<dd>A small UI marker next to any data field showing where its current value came from: the LLM (with a confidence %), a human (locked), a scraper, or an external system. Clicking it shows the full override history.</dd>
+
+<dt id="confirm-dismiss">Confirm / Dismiss (review states)</dt>
+<dd>Two special kinds of ledger entries that aren't corrections: <strong>Confirm</strong> means a human looked at the machine's answer and endorsed it as-is (still protects it from being silently changed later). <strong>Dismiss</strong> means a human decided the whole record is irrelevant (e.g. "this filing isn't actually a CMBS deal"), with a required explanation.</dd>
+
+<dt id="audit-log">Audit log</dt>
+<dd>A separate, older table that automatically records every raw database change (old value → new value) via a <a href="#trigger">trigger</a>, regardless of whether it went through the override system. The <a href="#ledger">ledger</a> tracks the meaning of a change ("this was a human correction"); the audit log tracks the mechanical fact of a change ("this row's this column changed at this time").</dd>
+</dl>
+
+<h2 id="workflow">Project &amp; workflow terms</h2>
+<dl>
+<dt id="branch">Branch (git branch)</dt>
+<dd>An isolated copy of the codebase's history where changes can be made and tested without touching the shared, working version until they're ready and reviewed. The plan's progress log mentions branch names like <code>dashboard-phase4</code> — that's "the isolated workspace where Phase 4's changes were built and tested."</dd>
+
+<dt id="worktree">Worktree</dt>
+<dd>A lightweight second working copy of the same repository, used so a branch's changes can be tested on disk without disturbing whatever else is checked out.</dd>
+
+<dt id="recon">Recon (live-DB recon)</dt>
+<dd>Phase 2's work: before writing any code, actually go look at the real, live database to verify assumptions (What type is this ID column? Does this table already have RLS? Is this column really missing?) instead of guessing from documentation that might be stale. Several "corrections" in later phases exist specifically because recon caught a wrong assumption early.</dd>
+
+<dt id="e2e">E2E (End-to-end) test / verification</dt>
+<dd>Actually running the whole real flow — not just checking the code compiles, but doing the actual action (override a value, then have the machine try to overwrite it, then confirm the override survived) and observing the real result.</dd>
+
+<dt id="worker-queue">Worker / Queue (RQ, Redis)</dt>
+<dd>Some jobs (scraping a website, running an LLM extraction) take too long to do while a user waits, so they're placed on a queue (built on Redis, a fast in-memory data store) and picked up by background <strong>worker</strong> processes running separately from the main web server.</dd>
+</dl>
+
+<p class="ask-agent">This glossary grows as new terms come up in later lessons. If a lesson uses a term that isn't here yet, ask your teaching agent to add it.</p>
+</body>
+</html>

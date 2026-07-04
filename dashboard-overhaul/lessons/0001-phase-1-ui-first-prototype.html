@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Phase 1 — UI-First Prototype</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<p class="kicker">Lesson 1 of 10 · Dashboard Overhaul</p>
+<h1>Phase 1 — The UI-First Prototype</h1>
+<p><span class="status-done">✅ DONE</span> — completed 2026-07-03, commit <code>4420e09</code> on branch <code>feat/dashboard-app-prototype</code>.</p>
+
+<h2>The one-sentence version</h2>
+<p>Before writing a single line of "make this button actually do something" code, build the <em>entire</em> new dashboard's screens, using <strong>real data</strong>, with every button that would change something showing a "not wired yet" message instead of actually changing it — so you (Raymond) could click through the whole thing and approve the layout before anyone spent a week wiring up real logic behind buttons that might get rearranged anyway.</p>
+
+<h2>Why this phase exists — the problem it prevents</h2>
+<p>The most expensive mistake in rebuilding an internal tool like this dashboard isn't a bug — it's building the <em>wrong</em> thing fully, then having to tear it apart because the layout doesn't match how you actually work. The team that owns this plan explicitly chose to front-load that risk: build the skeleton first, get it rejected or approved <em>cheaply</em>, and only pay the much higher cost of wiring real backend logic once the shape is locked in.</p>
+<p>This is why the plan's decision log (§2 of the plan) says: <em>"User-confirmed sequencing: UI first... all writes are visibly stubbed."</em> A <a href="../reference/glossary.html#stub">stub</a> is a button that looks completely real and clickable but, instead of changing anything, just pops up a small toast message like "not wired yet." That's deliberate — it lets you evaluate the <em>shape</em> of the tool (is this the right screen, are these the right columns, is this the right home page) completely separately from whether the underlying logic is correct yet.</p>
+
+<div class="analogy">
+<span class="label">Analogy</span>
+This is like a contractor building a full-size cardboard mockup of a kitchen renovation — every cabinet, counter, and appliance in its exact place — before pouring a single pipe or wire. You walk through the cardboard kitchen and say "actually, move the fridge over there" for free. Nobody wants to discover the fridge is in the wrong place after the plumbing's already run behind the wall.
+</div>
+
+<h2>What actually got built</h2>
+<p>All <strong>8 top-level screens</strong> ("routes," in web-development terms — see the <a href="../reference/glossary.html#spa">SPA</a> glossary entry) of the new dashboard were built as real, clickable pages:</p>
+<pre><code>Triage (home)  ·  Deals  ·  Documents  ·  15G Review
+Sources (Presales / Freddie / EDGAR)  ·  Costs  ·  Logs  ·  Settings</code></pre>
+<p>Two important choices baked into this phase, both from the plan's §2 "Decisions" section:</p>
+<ul>
+<li><strong>Reads are real, writes are fake.</strong> Every screen actually pulls live data straight from the Supabase database (using the same "read-only public key" approach the old dashboard already uses today — a proven, working pattern, not a new risk). But clicking "rename this deal" or "confirm this match" just shows the stub toast. This split is possible because reading data safely is a solved, low-risk problem here; <em>writing</em> data safely (with the override system, actor attribution, etc.) is the hard, high-risk part that later phases handle properly.</li>
+<li><strong>Not server-rendered.</strong> The plan explicitly rules out a framework called "TanStack Start" that would need its own always-running Node.js server process. Instead this is a plain <a href="../reference/glossary.html#spa">SPA</a> — static files served by a simple web server (nginx), with the existing Python backend (FastAPI) doing all the real work. One fewer moving service to run and monitor in production.</li>
+</ul>
+
+<h2>What Raymond's review actually changed</h2>
+<p>This phase wasn't a one-shot build — it went through <strong>two rounds of walkthrough feedback</strong> from Raymond, and several real decisions got locked in because of that review (captured in the plan's progress log, §0, and decisions §2):</p>
+<ul>
+<li>The old "Pipeline" tab was replaced entirely by a new <strong>Triage</strong> home page — a "here's what needs your attention right now" work queue, instead of a passive status view.</li>
+<li>A new concept, the <strong>human review tracker</strong>, was introduced at Raymond's request (originally called "validation," renamed after discussion): every machine-made match or classification now carries a state — <em>unreviewed, confirmed, corrected,</em> or <em>dismissed</em> — with comments. This became a load-bearing concept for several later phases (see Phase 4's <a href="../reference/glossary.html#confirm-dismiss">confirm/dismiss</a>).</li>
+<li>The visual scheme for "which rating agencies have coverage on this deal" (colored dots: blue = matched, green = downloaded, gray = still looking, hollow = stopped) was fixed during review.</li>
+<li>A real bug was caught: the "Monitoring" status column could show something that contradicted the "Status" column, because monitoring didn't respect whether a deal was actually active. Fixed before backend work ever started on it.</li>
+</ul>
+<div class="callout win">
+<span class="label">Why this matters for later lessons</span>
+Every one of these decisions became a fact baked into the plan for the phases that follow. When you read "Triage" or "review tracker" in a later phase, it's referring back to something decided here, on cardboard, before any real code risk was taken.
+</div>
+
+<h2>Check your understanding</h2>
+<div class="quiz" data-correct="2">
+<div class="q">Why did the team make writes fake ("stubbed") in Phase 1 but reads real?</div>
+<div class="options">
+<button class="opt">Because writing code is always harder than reading code, in every project</button>
+<button class="opt">Because the database doesn't allow real writes until Phase 4</button>
+<button class="opt">Because reading data safely was already a solved, low-risk problem (the old dashboard already does it), while writing data safely required the override system that later phases would build — so faking writes let the team validate the *layout* without waiting for that hard work</button>
+</div>
+<div class="feedback">The point isn't "reads are easy, writes are hard" as a universal rule — it's that <em>this specific team already had a proven, working way to read data safely</em>, and no proven way yet to write it safely (with human overrides protected). Faking the writes let them test the UI's shape immediately, without gating that on the hardest, highest-risk part of the whole plan.</div>
+</div>
+
+<h2>Recommended primary source</h2>
+<p><a href="https://tanstack.com/router/latest/docs/framework/react/overview" target="_blank" rel="noopener">TanStack Router — Overview</a>. Skim the first "Why TanStack Router?" section — it explains the "every filtered view is a shareable URL" idea in the tool's own words, which is the specific reason this plan picked it over simpler alternatives.</p>
+
+<p class="ask-agent">Questions about anything on this page — what a "route" really is, why static files vs. a running server matters, or what "commit <code>4420e09</code>" means — just ask your teaching agent.</p>
+
+<div class="phase-nav">
+<span></span>
+<a href="0002-phase-2-live-db-recon.html">Next: Phase 2 — Live-DB Recon →</a>
+</div>
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

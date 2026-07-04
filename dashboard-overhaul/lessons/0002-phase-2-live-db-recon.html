@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Phase 2 — Live-DB Recon</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<p class="kicker">Lesson 2 of 10 · Dashboard Overhaul</p>
+<h1>Phase 2 — Live-Database Recon</h1>
+<p><span class="status-done">✅ DONE</span> — completed 2026-07-03, findings written up in <code>docs/background/phase2-live-db-recon.md</code>.</p>
+
+<h2>The one-sentence version</h2>
+<p>Before writing any code that changes the real database, go look at the <em>actual, live</em> database directly and verify every assumption the plan was built on — because a plan written from memory, old docs, or a quick skim of the code will always contain a few wrong guesses, and it's far cheaper to find those now than after a <a href="../reference/glossary.html#migration">migration</a> has already shipped.</p>
+
+<h2>Why this phase exists</h2>
+<p>Every other phase in this plan assumes specific facts about the database: which columns already exist, which don't, what type an ID column is, whether a security feature is already on or off. Phase 2's entire job was to stop trusting the plan's early drafts and go check, directly against the live database, item by item.</p>
+<div class="analogy">
+<span class="label">Analogy</span>
+This is a surveyor visiting the actual construction site before the architect finalizes the blueprint — not to redesign the building, but to confirm the ground really is level where the drawings assumed it was, and to flag the one spot where there's already a gas line nobody's blueprint accounted for.
+</div>
+<p>This matters more than it might sound like, because several later phases in this plan explicitly say things like <em>"recon-corrected targets... the plan's old line-refs were stale"</em> (Phase 4) — meaning: without this phase, later work would have quietly written code against wrong assumptions, and either failed outright or silently done the wrong thing.</p>
+
+<h2>What was actually checked, and what it changed</h2>
+<p>Eight separate corrections came out of this recon and were folded into Phases 3 through 5. The most consequential ones:</p>
+<table>
+<tr><th>What was checked</th><th>What was assumed</th><th>What was actually true</th><th>Why it mattered</th></tr>
+<tr><td>ID column types (<a href="../reference/glossary.html#atomic">primary keys</a>) across tables</td><td>Not fully known</td><td><code>sec_filings</code> uses a plain <code>integer</code> ID — every other table uses <code>uuid</code> or <code>bigint</code></td><td>The override system's ledger (Phase 4) has to store IDs from many different tables in one shared column, then cast them back to the right type when writing — get this wrong and a single override RPC silently fails on that one table.</td></tr>
+<tr><td>Row Level Security (<a href="../reference/glossary.html#rls">RLS</a>) state</td><td>Unclear which tables had it</td><td>RLS is <strong>off</strong> on every table except one (<code>app_preferences</code>)</td><td>Confirms Phase 5's entire starting point: today, anyone with the public read-only key can read essentially the whole database. Phase 5 has to turn security on without breaking the still-running old dashboard.</td></tr>
+<tr><td>Which tables have a change-history <a href="../reference/glossary.html#trigger">trigger</a></td><td>Assumed most tables were covered</td><td>Presale index, Freddie index, and app-preferences tables had <strong>no</strong> <a href="../reference/glossary.html#audit-log">audit log</a> trigger at all</td><td>Certain human actions (like unlinking a presale match) would have had zero audit trail — invisible to any future "who changed this and when" question.</td></tr>
+<tr><td>How "stuck" or "paused" monitoring is actually recorded</td><td>Assumed a dedicated <code>consecutive_errors</code> column existed</td><td>That state actually lives buried inside a JSONB blob (<code>last_result</code>), not its own column</td><td>The Phase 12 "force re-check" feature has to clear the right nested key inside a blob, not just reset a column — a subtle but easy way to write code that looks right and does nothing.</td></tr>
+<tr><td>Where certain data actually gets written from</td><td>Plan's early draft cited specific file/line numbers</td><td>Several of those line references were stale — the real writer code had moved</td><td>Phase 4's "protect this field from being overwritten" guard has to be wired into the <em>actual</em> current write site, not a leftover reference from an earlier draft of the plan.</td></tr>
+</table>
+
+<div class="callout warn">
+<span class="label">The habit worth noticing</span>
+This phase is a specific instance of a much more general rule: <strong>verify against the live system before building on top of an assumption about it</strong>, especially when a mistake would touch real production data. It shows up again explicitly in Phase 4 and Phase 5 ("verify the RLS migration on a seeded throwaway branch before live").
+</div>
+
+<h2>How the recon was actually done, without touching production</h2>
+<p>The recon read Postgres's own internal "catalog" tables (<code>pg_policies</code>, <code>information_schema</code>) — think of these as the database's own self-description, a table that lists all the other tables, their columns, and their security rules. Reading these is completely safe; it's just looking, not changing anything.</p>
+
+<h2>Check your understanding</h2>
+<div class="quiz" data-correct="1">
+<div class="q">Why couldn't Phase 2 just trust the plan's first draft and the existing code comments?</div>
+<div class="options">
+<button class="opt">Because comments and early drafts are always lies</button>
+<button class="opt">Because plans and code drift out of sync with the real, live system over time — line references go stale, security settings change, and the only way to know the current truth is to check the live thing directly</button>
+<button class="opt">Because Postgres requires a special recon step before any migration can run</button>
+</div>
+<div class="feedback">Nothing here is about anyone lying — it's just that documentation, comments, and plans are static snapshots, while a live production system keeps changing underneath them. Phase 2's job was closing that gap before betting expensive migration work on stale assumptions.</div>
+</div>
+
+<h2>Recommended primary source</h2>
+<p><a href="https://supabase.com/docs/guides/database/postgres/row-level-security" target="_blank" rel="noopener">Supabase Docs — Row Level Security</a>. This is the concept the recon spent the most effort verifying (RLS state across every table), and understanding it now sets up Phase 5 cleanly.</p>
+
+<p class="ask-agent">If any of the table names or "recon-corrected" details feel unclear, ask your teaching agent — this lesson deliberately kept the recon findings compressed to the ones that shaped later phases.</p>
+
+<div class="phase-nav">
+<a href="0001-phase-1-ui-first-prototype.html">← Phase 1 — UI-First Prototype</a>
+<a href="0003-phase-3-llm-cost-logging.html">Next: Phase 3 — LLM Cost Logging →</a>
+</div>
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

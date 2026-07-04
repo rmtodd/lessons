@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Phase 3 — Central LLM Cost Logging</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<p class="kicker">Lesson 3 of 10 · Dashboard Overhaul</p>
+<h1>Phase 3 — Central LLM Cost Logging</h1>
+<p><span class="status-done">✅ DONE</span> — completed 2026-07-03, on branch <code>updated-dashboard-stage2</code>.</p>
+
+<h2>The one-sentence version</h2>
+<p>Make <em>every single call</em> to an LLM (the AI models that read filings and extract deal data) automatically record what it cost, in one place — so the future "Costs" screen in the dashboard can show, truthfully and completely, where the money is going, instead of only seeing whatever a few scattered manual logging calls happened to remember to record.</p>
+
+<h2>Why this phase exists</h2>
+<p>CMBSDOCS uses paid LLM calls throughout its pipeline — extracting structured data from 15G filings, matching presale documents to deals, and more. Each call costs real money, based on how many "tokens" (roughly, chunks of text) go in and come out. Before this phase, that spend was tracked manually: a handful of specific places in the code happened to write a row into a table called <code>api_call_log</code> after a call finished — but plenty of call sites didn't, and there was no shared, consistent way to compute the actual dollar cost from the raw token counts, especially since different AI providers (OpenAI, Gemini) charge differently and structure their "reasoning" tokens differently.</p>
+<div class="analogy">
+<span class="label">Analogy</span>
+Before this phase, expense tracking worked like a company where employees are supposed to fill out a paper receipt for each business lunch — reliable? Only when everyone remembers, and only if the receipt actually shows the right total. This phase installs a company card that automatically logs every purchase, at the point of purchase, with the true cost calculated the same way every time.
+</div>
+
+<h2>How it actually works</h2>
+<p>The team built one wrapper, <code>LLMCallContext</code>, that describes <em>what</em> a given LLM call is for (which operation, which deal, which filing) before the call happens. Then a single shared function, <code>call_json(..., context=...)</code>, wraps the actual call to the AI provider and — regardless of whether the call succeeds or fails — writes exactly one row into <code>api_call_log</code> afterward, computing the true cost via a new provider-aware pricing function (<code>pricing.estimate_cost_usd</code>) that correctly handles each provider's different token-pricing rules (e.g. OpenAI already includes "reasoning" tokens in its completion count; Gemini needed that added on separately).</p>
+<p>This was wired into all <strong>6 real call sites</strong> across the codebase in one pass, and the <strong>3 old, manual, inconsistent logging helpers were deleted</strong> — meaning there's now exactly one way this happens, not four slightly different ones that could drift apart.</p>
+
+<div class="callout win">
+<span class="label">A design choice worth noticing: "best-effort" logging</span>
+The plan is explicit that this logging must never <em>fail</em> an extraction — if writing the cost-log row itself has a problem, the actual extraction work still has to succeed. Logging is a side-effect, not a dependency. This is a recurring, important pattern: instrumentation/observability code should never be allowed to break the feature it's observing.
+</div>
+
+<h3>The "estimated" spend problem</h3>
+<p>Not every cost is a clean, per-call LLM API charge. Two other tools cost money without giving a clean per-call receipt: <strong>Browser-Use</strong> (an AI agent that operates a real web browser to log into agency sites) and <strong>Firecrawl</strong> (a web-scraping service). For these, the plan adds explicit <em>estimate</em> rows — clearly labeled <code>estimated=true</code> in their metadata — computed from a configured "average cost per task" rather than an exact receipt. The Costs screen (Phase 8 fleshes this out) is expected to show these separately from the precise, receipt-backed LLM costs, so nobody mistakes a rough estimate for an exact number.</p>
+
+<h2>Why this had to happen before the Costs screen could be trusted</h2>
+<p>The plan's §4.7 describes a "Costs" tab with real charts and anomaly alerts (e.g. "today's spend is 3× the trailing 7-day median"). None of that is meaningful if the underlying log is incomplete or inconsistently computed — an anomaly detector built on top of half-recorded data would either miss real problems or cry wolf constantly. Phase 3 is the unglamorous prerequisite that makes Phase 8's cost dashboard trustworthy at all.</p>
+
+<h2>What was deliberately left for later</h2>
+<p>A full live end-to-end test (actually running a real 15G re-extraction and watching a new row land in the real production table) was <strong>not</strong> done in this phase — the note in the plan says the local development environment this was built in doesn't have the real Supabase/Redis infrastructure installed. Instead, the team verified the database structure changes ("schema round-trip") directly. This is a normal, honest trade-off: verify what you can verify safely, and be explicit about what's still unverified rather than pretending it's fully tested.</p>
+
+<h2>Check your understanding</h2>
+<div class="quiz" data-correct="0">
+<div class="q">Why does the plan insist that cost-logging must never cause an extraction to fail, even if the logging itself breaks?</div>
+<div class="options">
+<button class="opt">Because logging is a side-effect meant to observe the real work, not a dependency the real work relies on — if writing a log row could break an actual extraction, the "cure" (tracking cost) would be worse than the disease (occasionally under-tracked cost)</button>
+<button class="opt">Because Supabase doesn't allow logging tables to have foreign keys</button>
+<button class="opt">Because the pricing function is too slow to run synchronously</button>
+</div>
+<div class="feedback">This is a general principle, not specific to this codebase: anything whose entire job is to *observe* a system (logs, metrics, cost tracking) should be built so that its own failure can never take down the thing it's observing.</div>
+</div>
+
+<h2>Recommended primary source</h2>
+<p>There isn't one canonical external doc for "LLM cost tracking design" — this is a project-specific pattern. If you want outside context on how token-based LLM pricing works generally, OpenAI's own <a href="https://platform.openai.com/docs/guides/text-generation" target="_blank" rel="noopener">Text generation guide</a> explains what "tokens" and "reasoning tokens" mean, which is the raw unit this whole phase is converting into dollars.</p>
+
+<p class="ask-agent">Curious what a "token" really is, or why Gemini and OpenAI price reasoning differently? Ask your teaching agent to go deeper on either.</p>
+
+<div class="phase-nav">
+<a href="0002-phase-2-live-db-recon.html">← Phase 2 — Live-DB Recon</a>
+<a href="0004-phase-4-override-core.html">Next: Phase 4 — Override Core + Actor Plumbing →</a>
+</div>
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Phase 5 — Auth + RLS Groundwork</title>
+<link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<p class="kicker">Lesson 5 of 10 · Dashboard Overhaul</p>
+<h1>Phase 5 — Auth + RLS Groundwork</h1>
+<p><span class="status-next">← NEXT</span> — not started yet as of 2026-07-03. Estimated ~1–1.5 days (smaller than originally scoped, because Phase 4 already built the actor-attribution plumbing this phase needs).</p>
+
+<h2>The one-sentence version</h2>
+<p>Turn on real login for the new dashboard, and turn on the database's own security rules (so it enforces "only logged-in people can read this" itself, rather than trusting every connected program to behave) — without breaking the still-running old dashboard while this transition happens.</p>
+
+<h2>Why this phase exists</h2>
+<p>Recall from Phase 2's recon: <strong>Row Level Security (RLS) is off on almost every table today.</strong> That means anyone holding the public "anon" read-only key — which the old dashboard has always used, openly, in the browser — can read essentially the entire database directly. That's been an acceptable risk so far because the only thing using that key is the trusted old dashboard. But the new dashboard is about to expose sensitive new tables (the override ledger, with human comments and audit-log entries, actor names) that were never meant to be casually readable by anyone with that key.</p>
+<div class="analogy">
+<span class="label">Analogy</span>
+Imagine an office where the front door has always been unlocked, but the only person who's ever walked in is a trusted coworker. That's been fine. Now you're about to add rooms with sensitive personnel files inside — you can't keep relying on "well, nobody's tried the door" as your security model once there's something worth stealing behind it. You lock the door and hand out keys only to people who log in.
+</div>
+
+<h2>Two separate things happening at once (don't conflate them)</h2>
+<p>This phase covers two related but distinct concepts — worth keeping straight, because they answer two different questions:</p>
+<table>
+<tr><th>Concept</th><th>Question it answers</th><th>Enforced where</th></tr>
+<tr><td><strong>Auth</strong> (<a href="../reference/glossary.html#jwt">JWT</a>-based login)</td><td>"Who is this person?"</td><td>The FastAPI backend, checking a signed token attached to every request</td></tr>
+<tr><td><strong>RLS</strong> (Row Level Security)</td><td>"What is this person allowed to read, at the database level?"</td><td>Postgres itself, on every single query, regardless of which program is asking</td></tr>
+</table>
+<p>You genuinely need both. Auth alone would only protect requests that go <em>through</em> the FastAPI backend — but the new dashboard's read path (per the plan's §2 decisions) goes <strong>directly from the browser to Supabase</strong> for most reads, bypassing FastAPI entirely for speed. If only the backend checked identity, all those direct reads would remain wide open no matter how good the login screen looks. RLS is what makes the database itself refuse to hand out rows to someone who isn't allowed to see them, independent of which door they came through.</p>
+
+<h2>The "swap the stub" trick — most of the hard part is already done</h2>
+<p>Here's a pleasant surprise buried in this phase: Phase 4 already built <strong>all</strong> the actor-attribution plumbing this phase needs — a placeholder function called <code>require_actor</code> already sits on every write-changing endpoint, and the RPCs already carry an actor's identity all the way into the audit log. Today, that placeholder just trusts a plain header sent by whatever's calling it (or defaults to a generic "dashboard" actor) — it doesn't yet verify a real, cryptographically signed login token.</p>
+<p>Phase 5's actual job on the backend side is much smaller than it sounds: <strong>swap the inside of that one placeholder function</strong> to actually verify a real Supabase login token (a JWT), instead of trusting whatever header shows up. Everywhere that placeholder is already wired in (every mutating endpoint, from Phase 4) automatically gets real protection the moment the swap happens — no new wiring required at each of those call sites.</p>
+<div class="callout win">
+<span class="label">Why front-loading Phase 4's plumbing paid off</span>
+This is a direct payoff of Phase 4 having been built with auth in mind from the start, even though auth itself wasn't wired yet. It's a good example of a general engineering habit: build the "who is doing this" plumbing early and generically, even before you've decided exactly how identity will be verified — swapping the verification logic later is far cheaper than retrofitting attribution into dozens of already-shipped endpoints.
+</div>
+<p>There's also a safety valve: a setting called <code>REQUIRE_AUTH</code>, defaulting to <code>false</code>. Until it's flipped on (planned for Phase 9, cutover), the backend keeps accepting the old trust-a-header behavior — so this phase can ship without immediately locking anyone out while the frontend login screen is still being built and tested.</p>
+
+<h2>The risky part: turning RLS on without an outage</h2>
+<p>This is the part the plan is most careful about, for good reason: <strong>turning RLS on with the wrong policy is an instant outage.</strong> If a table's new security policy is even slightly too strict, the still-running old dashboard (which reads with the plain <code>anon</code> key, not a real login) instantly loses access to real data, in production, with real people relying on it.</p>
+<p>The plan's mitigation has two parts:</p>
+<ul>
+<li><strong>Two policies exist side-by-side, temporarily.</strong> Each table gets both an <code>authenticated</code> policy (for the new, logged-in dashboard) <em>and</em> a temporary <code>anon</code> policy that deliberately replicates exactly what the old dashboard could already see — so nothing changes for the old dashboard's access pattern, even though RLS is technically now "on." The anon policies get removed later, at Phase 9's cutover, once the old dashboard is retired for good.</li>
+<li><strong>Test on a disposable copy of the database first.</strong> Following the same instinct as Phase 2's recon and Phase 4's verification approach, this migration gets tried on a seeded, throwaway Supabase branch (a temporary, isolated copy of the database) before ever touching the live one.</li>
+</ul>
+
+<h2>A newly-discovered wrinkle that shapes this phase's scope</h2>
+<p>Phase 4 surfaced a real, live security gap worth understanding, because Phase 5 has to correct for it directly: two brand-new internal tables built in Phase 4 — the override ledger and the audit log — were, by default, <strong>readable by anyone with the anon key</strong>, the same as everything else. That's a problem specifically because these tables now contain human review comments and actor names that were never meant to be casually public. The plan is explicit: give these tables <strong>authenticated-only</strong> policies from the very start — do <em>not</em> replicate the old dashboard's anon access to them, since the old dashboard never needed to see them anyway.</p>
+<p>A second, subtler gotcha the plan flags: simply running <code>REVOKE ... FROM PUBLIC</code> on a database permission does <strong>not</strong> remove Supabase's own default grants to the <code>anon</code> and <code>authenticated</code> roles — those are separate, additional grants Supabase adds automatically. This actually bit Phase 4 for real: the override-writing RPCs were briefly callable by anyone with the anon key, directly over Supabase's REST API, despite looking properly locked down. The fix had to explicitly name <code>anon, authenticated</code> in the revoke statement. Phase 5 has to re-run Supabase's own automated security-advisor check after the RLS migration specifically to catch this class of mistake again.</p>
+
+<h2>Check your understanding</h2>
+<div class="quiz" data-correct="2">
+<div class="q">Why isn't backend-side login (Auth/JWT) enough by itself, without also turning on RLS at the database?</div>
+<div class="options">
+<button class="opt">Because JWTs expire too quickly to be useful</button>
+<button class="opt">Because RLS is required by law for financial data</button>
+<button class="opt">Because the new dashboard reads most data directly from Supabase, bypassing the FastAPI backend entirely — so a check that only lives in the backend would never even see those direct reads. RLS enforces the rule at the database itself, no matter which door a request comes through</button>
+</div>
+<div class="feedback">The key fact is the plan's read-path decision from §2: reads go straight to Supabase, not through FastAPI. Any protection that only lives in FastAPI would have a wide-open hole exactly where most traffic flows.</div>
+</div>
+
+<h2>Recommended primary source</h2>
+<p><a href="https://supabase.com/docs/guides/auth/jwts" target="_blank" rel="noopener">Supabase Docs — JWTs</a> paired with <a href="https://supabase.com/docs/guides/database/postgres/row-level-security" target="_blank" rel="noopener">Supabase Docs — Row Level Security</a>. Reading these back to back makes the Auth/RLS split in this lesson click much faster than reading either alone.</p>
+
+<p class="ask-agent">Once this phase actually starts, ask your teaching agent to walk you through the real migration diff when it's ready — seeing the two policies (anon vs authenticated) side by side on an actual table will cement this fast.</p>
+
+<div class="phase-nav">
+<a href="0004-phase-4-override-core.html">← Phase 4 — Override Core</a>
+<a href="0006-phase-6-wire-writes.html">Next: Phase 6 — Wire Writes →</a>
+</div>
+<script src="../assets/quiz.js"></script>
+</body>
+</html>
